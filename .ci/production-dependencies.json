@@ -3,8 +3,8 @@
   "owner": "SideSign",
   "classification": "build-only dependency wiring; no runtime behavior changes",
   "source_checkpoint": "ed30d3989ea0f80bcb91466d6d5ca043f4366df0",
-  "native_resolver_status": "not_run",
-  "origin_hash_status": "stale checkpoint hash removed; native resolver must generate its own value",
+  "native_resolver_status": "passed_remote_macos",
+  "origin_hash_status": "verified_absent_after_remote_resolution",
   "dependency_files": {
     "Package.swift": {
       "mode": "100644",
@@ -18,5 +18,53 @@
     }
   },
   "child_gitlinks": {},
-  "test_files": {}
+  "test_files": {},
+  "resolver_receipt": {
+    "schema_version": 1,
+    "phase": "sidesign_remote_macos",
+    "run_url": "https://github.com/NRG-Wardog/LiveContainer/actions/runs/37700683714",
+    "run_id": 37700683714,
+    "run_attempt": 1,
+    "validation_host_commit": "5544230616d6e3eefad1cf49499c311edfce1c3c",
+    "validation_host_tree": "460df355a9dde34b25dd25e3c90f527c01fda09f",
+    "artifact_id": 11516639634,
+    "artifact_zip_sha256": "2492f660f7b1ea8cf45d2dc2bbce490290f46276ec94fe2b6d792d18be841fff",
+    "resolver_tested_commit": "0d451a6eca73358be8dfed6a89c4e227752d0083",
+    "resolver_tested_tree": "702559ec7158d567de4b0cb383dc9d9f4bc20bf7",
+    "anisette_commit": "62ce85c8798d8eab8e29752aba7dc9f1f6a5b80d",
+    "lock_sha256": "5ccebb5f4fadcde4377db365de53e3c29806f5ed66ca0e039e7f70dd368343bb",
+    "originHash": null,
+    "observed_metadata_status": "absent_requires_review",
+    "review_outcome": "accepted_observed_absence",
+    "native_tests": {
+      "scope": "sidesign",
+      "status": "PASS",
+      "executed": 5,
+      "tests": [
+        "archiveDeflateRoundtrip",
+        "archiveStoreRoundtrip",
+        "certificateRequestCSRGeneration",
+        "developerPortalSingleton",
+        "deviceInitializationAndFiltering"
+      ]
+    },
+    "compiler_source_counts": {
+      "SideSign": 43,
+      "AnisetteKit": 10
+    },
+    "ios_compilation": "NOT_RUN_PHASE_1",
+    "production_ready": false,
+    "evidence_sha256": {
+      "production-phase-status.json": "e1e230413e687d1a74b72416e1f83b275273e9f10719b638f8249532e999e190",
+      "resolution.json": "a38012fbab101e00b0f4e336aa65ad12b849198dd8f943de06b6a39fe0285832",
+      "resolution-after-build.json": "a38012fbab101e00b0f4e336aa65ad12b849198dd8f943de06b6a39fe0285832",
+      "source-proof-before.json": "41e953888258dff06be77d2c6efcb1ed27a3f3376da44aabfcb3b05129d52d77",
+      "source-proof-after-resolution.json": "3b34f8f7ed3987f395a34cb1e73c937bd7a1b9e8d2a1c4b246f8aa8e84c10ea7",
+      "source-proof-after-build.json": "3b34f8f7ed3987f395a34cb1e73c937bd7a1b9e8d2a1c4b246f8aa8e84c10ea7",
+      "sidesign-tests.json": "950496040825e7551864aa5d4132070a861dd63a0eb9072d4715eb3324fac219",
+      "compiler-input-proof.json": "956deb03c04c5803390f15daf62c5c2ef3e5afa2a6a779991b73a71851b007f3",
+      "reviewed-production-inputs.json": "d55a0dc5179b6bfed4e62c491c161b506a0f224068257a5d3695db7ba2bcf0e1",
+      "reviewed-toolchain.json": "8397a85f1fe0ae25f3c808dd81befb0d8882a182fb4a8be723e744dbf6079800"
+    }
+  }
 }

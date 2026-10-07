@@ -73,6 +73,31 @@ class RepositoryTests(unittest.TestCase):
         self.assertFalse(first['production_ready'])
         self.assertEqual(first['runtime_behavior_changes'], [])
 
+    def test_resolver_report_names_tested_commit_without_claiming_readiness(self):
+        proof = self.prove()
+        self.assertEqual(proof['native_resolver_status'], 'passed_remote_macos')
+        self.assertEqual(proof['resolver_tested_commit'], '0d451a6eca73358be8dfed6a89c4e227752d0083')
+        self.assertEqual(proof['ios_compilation'], 'NOT_RUN_PHASE_1')
+        self.assertFalse(proof['production_ready'])
+
+    def test_missing_resolver_receipt_rejected(self):
+        path = self.root/'.ci/production-dependencies.json'
+        spec = json.loads(path.read_text())
+        del spec['resolver_receipt']
+        path.write_text(json.dumps(spec))
+        self.commit()
+        with self.assertRaisesRegex(PROOF.ProofError, 'Missing reviewed resolver receipt'):
+            self.prove()
+
+    def test_changed_resolver_receipt_rejected(self):
+        path = self.root/'.ci/production-dependencies.json'
+        spec = json.loads(path.read_text())
+        spec['resolver_receipt']['originHash'] = '0'*64
+        path.write_text(json.dumps(spec))
+        self.commit()
+        with self.assertRaisesRegex(PROOF.ProofError, 'Reviewed resolver receipt mismatch'):
+            self.prove()
+
     def test_shallow_history_rejected(self):
         (self.root/'.git/shallow').write_bytes(self.raw_git('rev-parse','HEAD'))
         with self.assertRaisesRegex(PROOF.ProofError, 'Shallow history'):

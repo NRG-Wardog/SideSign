@@ -23,6 +23,8 @@ CHECKPOINTS = {
 ANISETTE = '62ce85c8798d8eab8e29752aba7dc9f1f6a5b80d'
 ANISETTE_URL = 'https://github.com/NRG-Wardog/AnisetteKit.git'
 MINIMUXER = 'efbcab05d7d636aa37c6bf6c7f364d122c5610f6'
+# Reviewed actual Phase 1 receipt; absent originHash is intentional and verified.
+SIDESIGN_RESOLVER_RECEIPT_SHA256 = 'df64e92b500ffe949ae51d51c54d307de99424d243cae695a64be359575dee60'
 LOCKS = {'SideSign': 'Package.resolved',
          'SideStore': 'AltStore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'}
 DEPENDENCY_FILES = {'SideSign': {'Package.swift', LOCKS['SideSign']},
@@ -104,13 +106,36 @@ def pin_map(lock):
 
 
 def verify_lock(current, baseline):
-    require(set(current) == {'pins', 'version'}, 'Provisional lock must omit stale/unverified originHash')
+    require(set(current) == {'pins', 'version'}, 'Lock must preserve the reviewed absent originHash state')
     require(current['version'] == baseline['version'] == 3, 'Lock schema changed')
     expected = pin_map(baseline)
     expected['anisettekit'] = {'identity': 'anisettekit', 'kind': 'remoteSourceControl',
         'location': ANISETTE_URL, 'state': {'revision': ANISETTE}}
     require(pin_map(current) == expected, 'SwiftPM pin drift outside exact AnisetteKit transition')
     return len(expected) - 1
+
+
+
+def verify_resolver_receipt(root, spec, lock_bytes):
+    if spec['owner'] != 'SideSign':
+        require(spec['native_resolver_status'] == 'not_run' and 'resolver_receipt' not in spec,
+                'Unexpected unreviewed resolver receipt')
+        return None
+    receipt = spec.get('resolver_receipt')
+    require(isinstance(receipt, dict), 'Missing reviewed resolver receipt')
+    encoded = json.dumps(receipt, sort_keys=True, separators=(',', ':')).encode()
+    require(sha(encoded) == SIDESIGN_RESOLVER_RECEIPT_SHA256, 'Reviewed resolver receipt mismatch')
+    require(spec['native_resolver_status'] == 'passed_remote_macos' and
+            spec['origin_hash_status'] == 'verified_absent_after_remote_resolution',
+            'Resolver status differs from reviewed observed absence')
+    tested = receipt['resolver_tested_commit']
+    git(root, 'merge-base', '--is-ancestor', tested, 'HEAD')
+    require(git(root, 'rev-parse', tested + '^{tree}').decode().strip() ==
+            receipt['resolver_tested_tree'], 'Resolver-tested source tree changed')
+    require(sha(lock_bytes) == receipt['lock_sha256'] and
+            git(root, 'show', tested + ':' + LOCKS['SideSign']) == lock_bytes,
+            'Lock differs from actual resolver-tested bytes')
+    return receipt
 
 
 def verify(root, *, allow_pending_child_pins=False):
@@ -191,6 +216,7 @@ def verify(root, *, allow_pending_child_pins=False):
     require(not git(root, 'status', '--porcelain', '--untracked-files=all').strip(), 'Dirty repository')
     lockpath = LOCKS[owner]
     frozen_pins = verify_lock(json.loads(data[after[lockpath][2]]), json.loads(data[before[lockpath][2]]))
+    receipt = verify_resolver_receipt(root, spec, data[after[lockpath][2]])
     if owner == 'SideSign':
         original = data[before['Package.swift'][2]].decode()
         old = '.package(url: "https://github.com/mahee96/AnisetteKit.git",   branch: "main"),'
@@ -208,7 +234,12 @@ def verify(root, *, allow_pending_child_pins=False):
             'checkpoint':checkpoint, 'commit':git(root, 'rev-parse', 'HEAD').decode().strip(),
             'unchanged_checkpoint_blobs':unchanged, 'dependency_files':sorted(DEPENDENCY_FILES[owner]),
             'test_files':sorted(TEST_FILES[owner]), 'unrelated_swiftpm_pins_preserved':frozen_pins,
-            'child_gitlinks':links, 'native_resolver_status':'not_run', 'production_ready':False,
+            'child_gitlinks':links, 'native_resolver_status':spec['native_resolver_status'],
+            'resolver_tested_commit':receipt['resolver_tested_commit'] if receipt else None,
+            'resolver_tested_tree':receipt['resolver_tested_tree'] if receipt else None,
+            'resolver_run_url':receipt['run_url'] if receipt else None,
+            'ios_compilation':'NOT_RUN_PHASE_1' if receipt else 'NOT_RUN',
+            'production_ready':False,
             'runtime_behavior_changes':[]}
 
 
