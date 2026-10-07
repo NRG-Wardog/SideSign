@@ -2,7 +2,7 @@
   "schema_version": 1,
   "owner": "SideSign",
   "classification": "build-only dependency wiring; no runtime behavior changes",
-  "source_checkpoint": "aaa4375a59075a7b0a446cf4c2dc8193c247a875",
+  "source_checkpoint": "ed30d3989ea0f80bcb91466d6d5ca043f4366df0",
   "native_resolver_status": "not_run",
   "origin_hash_status": "stale checkpoint hash removed; native resolver must generate its own value",
   "dependency_files": {
