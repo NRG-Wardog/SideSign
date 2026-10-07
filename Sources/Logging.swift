@@ -15,8 +15,10 @@ public enum SideSignLogging {
     public static func setLogging(_ enabled: Bool) {
         defer { debugLog("[SideSign] setLogging(\(enabled)) completed") }
         debugLog("[SideSign] setLogging(\(enabled)) invoked")
-        isLoggingEnabled = enabled
-        AnisetteKitLogging.setLogging(enabled)
+        // SIDESIGN_USER_LOG_PRIVACY_V1: never enable logs containing authentication or portal response data.
+        _ = enabled
+        isLoggingEnabled = false
+        AnisetteKitLogging.setLogging(false)
     }
 }
 
@@ -37,23 +39,13 @@ private func getTag(level: String) -> String {
 }
 
 public func debugLog(_ text: @autoclosure () -> String) {
-    let message = text()
-    if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
-        print(message, terminator: "")
-    } else {
-        print("\(getTag(level: "[D]"))\(message)")
-    }
+    // SIDESIGN_USER_LOG_PRIVACY_V1: DSID, headers, 2FA bodies, and raw causes stay out of copied logs.
+    _ = text
 }
 
 public func verboseLog(_ text: @autoclosure () -> String) {
-    if SideSignLogging.isLoggingEnabled {
-        let message = text()
-        if !message.isEmpty && message.allSatisfy({ $0 == "\n" || $0 == "\r" }) {
-            print(message, terminator: "")
-        } else {
-            print("\(getTag(level: "[V]"))\(message)")
-        }
-    }
+    // SIDESIGN_USER_LOG_PRIVACY_V1: verbose output is silent even when callers request it.
+    _ = text
 }
 
 func prettyJSONString(from object: Any) -> String {
