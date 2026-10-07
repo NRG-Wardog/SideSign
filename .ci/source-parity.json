@@ -1,0 +1,63 @@
+{
+  "owner": "SideSign",
+  "upstream_base": "a731c0d5a9a6617c7b385ae493e07ffb7f81cd5d",
+  "fork_commit": "b1d2bc1f013237a199b09ab9facaeac655c345b9",
+  "branch": "migration/runtime-source-141776ba",
+  "behavior_differences": [],
+  "files": [
+    {
+      "path": "Sources/DeveloperPortal/Authentication.swift",
+      "upstream_sha256": "5ed28c2b357767170f62d0aad6f6a7457a02e0422eb98f1c6b169ab1ac6053f4",
+      "old_generated_sha256": "5b6412e3b52b355b6f7dd2e5e6b03f25b5ff11eeeaa28bed3c34a4f360109729",
+      "new_source_sha256": "5b6412e3b52b355b6f7dd2e5e6b03f25b5ff11eeeaa28bed3c34a4f360109729",
+      "mode": "0o644",
+      "subsystem": "Maintain typed two factor and portal response contracts",
+      "commit": "75029063aa901a8ed5550714bc96aae4194383bb",
+      "git_mode": "100644"
+    },
+    {
+      "path": "Sources/DeveloperPortal/DeveloperPortalAPI.swift",
+      "upstream_sha256": "8bfb71fd38463210ab8140ea7a2a1ec60b4af324f8c9bacfb7762bce02cac43f",
+      "old_generated_sha256": "d767d97324acae5c983f31443de5f6604dc5bf59281d19c3e50adeee4c629a41",
+      "new_source_sha256": "d767d97324acae5c983f31443de5f6604dc5bf59281d19c3e50adeee4c629a41",
+      "mode": "0o644",
+      "subsystem": "Maintain typed two factor and portal response contracts",
+      "commit": "75029063aa901a8ed5550714bc96aae4194383bb",
+      "git_mode": "100644"
+    },
+    {
+      "path": "Sources/DeveloperPortal/AppIDs.swift",
+      "upstream_sha256": "4ce4431c4e90ddad1e9a5558d291c51ef5e1bac20ccd9e18cc0f9e9be3aae032",
+      "old_generated_sha256": "0456e3397ebd9e5c15a352c0795b90e2f590af7f167784cc2f810f5ebb088e5c",
+      "new_source_sha256": "0456e3397ebd9e5c15a352c0795b90e2f590af7f167784cc2f810f5ebb088e5c",
+      "mode": "0o644",
+      "subsystem": "Maintain typed two factor and portal response contracts",
+      "commit": "75029063aa901a8ed5550714bc96aae4194383bb",
+      "git_mode": "100644"
+    },
+    {
+      "path": "Sources/Logging.swift",
+      "upstream_sha256": "17e69643ee5b2e6c07af18d0c2ccbfdeaeea6cdaae450da6cd12414cc076d615",
+      "old_generated_sha256": "49aeee12d89bb092d83302979e493343c3ac1fd957f546f22df07cd846e7fe3f",
+      "new_source_sha256": "49aeee12d89bb092d83302979e493343c3ac1fd957f546f22df07cd846e7fe3f",
+      "mode": "0o644",
+      "subsystem": "Maintain privacy preserving logging sinks",
+      "commit": "af19b11ac5589f000423b6216e59ddaec4a8c410",
+      "git_mode": "100644"
+    }
+  ],
+  "prepared_evidence_excluded": [],
+  "tests_run": [
+    "git diff --check",
+    "exact changed source byte and mode comparison"
+  ],
+  "tests_not_run": [
+    "Swift/Xcode build"
+  ],
+  "source_parity_status": "exact_prepared_bytes_pass",
+  "metadata_files": [
+    "NOTICE-NRG-Wardog",
+    ".ci/source-parity.py",
+    ".ci/source-parity.json"
+  ]
+}
