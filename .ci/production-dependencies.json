@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "owner": "SideSign",
+  "classification": "build-only dependency wiring; no runtime behavior changes",
+  "source_checkpoint": "aaa4375a59075a7b0a446cf4c2dc8193c247a875",
+  "native_resolver_status": "not_run",
+  "origin_hash_status": "stale checkpoint hash removed; native resolver must generate its own value",
+  "dependency_files": {
+    "Package.swift": {
+      "mode": "100644",
+      "checkpoint_sha256": "39a2c6b3c259abd83e4c3be28cc2ffe6cd1d43fb0fab9246df174eef62cbd64e",
+      "production_sha256": "20bf532e1df402d5c798f9e598a493e0c6a4954dc2bd0e5f37ad703003f516e9"
+    },
+    "Package.resolved": {
+      "mode": "100644",
+      "checkpoint_sha256": "9c48eaa0f629442ab708f5cc4a638d0bf2955123fd74b6e3bb7fae6d16a41474",
+      "production_sha256": "5ccebb5f4fadcde4377db365de53e3c29806f5ed66ca0e039e7f70dd368343bb"
+    }
+  },
+  "child_gitlinks": {},
+  "test_files": {}
+}
