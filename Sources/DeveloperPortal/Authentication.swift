@@ -563,9 +563,10 @@ public extension DeveloperPortal {
         case voice(phoneID: String)
     }
 
+    // V3_TFA_TYPED_STATE_V1: wrong-code state comes from SideSign's typed response parser.
     private enum TwoFactorAuthValidationResult {
         case success
-        case retry(message: String)
+        case retry(TwoFactorVerificationFailure)
     }
 
     private func handle2FARequest(isTrustedDevice: Bool,
@@ -593,7 +594,7 @@ public extension DeveloperPortal {
         var activeChannel: TwoFactorAuthChannel? = nil
 
         while true {
-            debugLog("[SideSign] Prompting user with 2FA request (\(currentRequest))...")
+            debugLog("[SideSign] Prompting user with 2FA request mode=\(currentRequest.mode?.rawValue ?? "unknown")")
             let response = try await verificationHandler(currentRequest)
 
             switch response {
@@ -634,15 +635,16 @@ public extension DeveloperPortal {
                         case .success:
                             debugLog("[SideSign] 2FA code verified successfully!")
                             return
-                        case .retry(let message):
-                            debugLog("[SideSign] 2FA verification failed, retrying: \(message)")
+                        case .retry(let failure):
+                            debugLog("[SideSign] 2FA verification rejected kind=\(failure.rawValue)")
+                            let typedError = "V3_TFA_FAILURE:\(failure.rawValue)"
                             switch channel {
                                 case .trustedDevice:
-                                    currentRequest = .trustedDevice(error: message)
+                                    currentRequest = .trustedDevice(error: typedError)
                                 case .sms(let phoneID):
-                                    currentRequest = .sms(phoneNumbers: phoneNumbers, activeID: phoneID, error: message)
+                                    currentRequest = .sms(phoneNumbers: phoneNumbers, activeID: phoneID, error: typedError)
                                 case .voice(let phoneID):
-                                    currentRequest = .voice(phoneNumbers: phoneNumbers, activeID: phoneID, error: message)
+                                    currentRequest = .voice(phoneNumbers: phoneNumbers, activeID: phoneID, error: typedError)
                             }
                     }
 
@@ -848,9 +850,8 @@ public extension DeveloperPortal {
             debugLog("[SideSign] Too many 2FA attempts (\(errorCode), HTTP \(statusCode)): \(msg)")
             throw DeveloperPortalError.tooManyAttempts(cause: msg)
         } else if errorCode == GrandSlamAuthErrorCodes.incorrectVerificationCode {
-            let msg = errorMsg ?? "Incorrect verification code. Please try again."
-            debugLog("[SideSign] Incorrect 2FA verification code (\(errorCode), HTTP \(statusCode)): \(msg)")
-            return .retry(message: msg)
+            debugLog("[SideSign] Incorrect 2FA verification code (\(errorCode), HTTP \(statusCode))")
+            return .retry(.incorrectCode)
         } else if errorCode != 0 {
             let msg = errorMsg ?? "2FA verification error"
             debugLog("[SideSign] 2FA verification error (\(errorCode), HTTP \(statusCode)): \(msg)")
@@ -864,18 +865,14 @@ public extension DeveloperPortal {
         }
 
         guard statusCode == HTTPStatusCodes.ok else {
-            let rawStr = prettyJSONString(from: data)
-            let reason = errorMsg ?? HTTPStatusCodes.localizedDescription(for: statusCode)
-            debugLog("[SideSign] 2FA verification failed (HTTP \(statusCode)): \(reason) - body: \(rawStr)")
-            return .retry(message: reason)
+            debugLog("[SideSign] 2FA verification failed with HTTP status=\(statusCode)")
+            return .retry(statusCode >= 500 || statusCode == 0 ? .serviceUnavailable : .unknown)
         }
 
         if requirePeToken {
             guard httpResponse?.allHeaderFields.keys.contains(where: { ($0 as? String)?.lowercased() == "x-apple-pe-token" }) == true else {
-                let rawStr = prettyJSONString(from: data)
-                let reason = errorMsg ?? "Incorrect verification code or missing session token"
-                debugLog("[SideSign] Secondary code verification failed (HTTP \(HTTPStatusCodes.ok) missing PE token header): \(reason) - Body: \(rawStr)")
-                return .retry(message: reason)
+                debugLog("[SideSign] Secondary code verification could not confirm the session token")
+                return .retry(.unknown)
             }
         }
 

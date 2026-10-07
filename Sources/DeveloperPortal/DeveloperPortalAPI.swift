@@ -25,6 +25,21 @@ public enum TwoFactorDeliveryMode: String, Sendable, CaseIterable {
     case voice
 }
 
+// V3_TFA_TYPED_STATE_V1: provider retry outcomes are represented by a closed enum.
+public enum TwoFactorVerificationFailure: String, Sendable, Equatable {
+    case incorrectCode
+    case serviceUnavailable
+    case unknown
+
+    public var userMessage: String {
+        switch self {
+        case .incorrectCode: return "The verification code was not accepted. Enter a new code and try again."
+        case .serviceUnavailable: return "Apple could not verify the code just now. Try again, or change verification method."
+        case .unknown: return "Apple could not verify that code. Enter it again or change verification method."
+        }
+    }
+}
+
 public enum TwoFactorRequest: Sendable, Equatable {
     case selectDeliveryMethod(preferredMode: TwoFactorDeliveryMode, phoneNumbers: [TrustedPhoneNumber])
     case trustedDevice(error: String? = nil)
@@ -33,28 +48,30 @@ public enum TwoFactorRequest: Sendable, Equatable {
 
     public var mode: TwoFactorDeliveryMode? {
         switch self {
-        case .selectDeliveryMethod(let preferredMode, _):
-            return preferredMode
-        case .trustedDevice:
-            return .trustedDevice
-        case .sms:
-            return .sms
-        case .voice:
-            return .voice
+        case .selectDeliveryMethod(let preferredMode, _): return preferredMode
+        case .trustedDevice: return .trustedDevice
+        case .sms: return .sms
+        case .voice: return .voice
         }
     }
 
-    public var error: String? {
+    private var rawError: String? {
         switch self {
-        case .selectDeliveryMethod:
-            return nil
-        case .trustedDevice(let error):
-            return error
-        case .sms(_, _, let error):
-            return error
-        case .voice(_, _, let error):
-            return error
+        case .selectDeliveryMethod: return nil
+        case .trustedDevice(let error): return error
+        case .sms(_, _, let error): return error
+        case .voice(_, _, let error): return error
         }
+    }
+
+    public var verificationFailure: TwoFactorVerificationFailure? {
+        guard let rawError, rawError.hasPrefix("V3_TFA_FAILURE:"),
+              let value = TwoFactorVerificationFailure(rawValue: String(rawError.dropFirst("V3_TFA_FAILURE:".count))) else { return nil }
+        return value
+    }
+
+    public var error: String? {
+        verificationFailure?.userMessage ?? rawError
     }
 }
 
@@ -350,6 +367,7 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
         }
 
         let httpResponse = response as? HTTPURLResponse
+        SideSignPortalDiagnostics.responseObserver?(httpResponse?.statusCode, nil)
         let statusCode = httpResponse?.statusCode ?? 0
 
         guard !data.isEmpty else {
@@ -369,10 +387,12 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
         if let status = (try? PropertyListDecoder().decode(DeveloperPortalStatusResponse.self, from: data))
             ?? (try? JSONDecoder().decode(DeveloperPortalStatusResponse.self, from: data)) {
             if let errors = status.errors, let firstError = errors.first, let detail = firstError.detail {
+                SideSignPortalDiagnostics.responseObserver?(httpResponse?.statusCode, SideSignPortalDiagnostics.safeProviderCode(firstError.code))
                 debugLog("[SideSign] processResponse parsed Apple developer API error: \(detail)")
                 throw ServerError.underlyingError(code: -1, message: detail)
             }
             if let code = status.resultCode, code != DeveloperPortalResultCodes.success {
+                SideSignPortalDiagnostics.resultCodeObserver?(code)
                 let message = status.userString ?? status.resultString ?? status.errorString ?? "Apple Developer Portal Error"
                 if let customError = resultCodeHandler?(code, message) {
                     debugLog("[SideSign] processResponse error (code: \(code)): \(customError.localizedDescription)")
@@ -462,6 +482,7 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
         }
 
         let httpResponse = response as? HTTPURLResponse
+        SideSignPortalDiagnostics.responseObserver?(httpResponse?.statusCode, nil)
         let statusCode = httpResponse?.statusCode ?? 0
         let isDelete = methodOverride == "DELETE"
         let isNoContent = statusCode == HTTPStatusCodes.noContent
@@ -483,10 +504,12 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
         if let status = try? JSONDecoder().decode(DeveloperPortalStatusResponse.self, from: data) {
             if let errors = status.errors, let firstError = errors.first, let detail = firstError.detail {
+                SideSignPortalDiagnostics.responseObserver?(httpResponse?.statusCode, SideSignPortalDiagnostics.safeProviderCode(firstError.code))
                 debugLog("[SideSign] processResponse parsed Apple developer API error: \(detail)")
                 throw ServerError.underlyingError(code: -1, message: detail)
             }
             if let code = status.resultCode, code != DeveloperPortalResultCodes.success {
+                SideSignPortalDiagnostics.resultCodeObserver?(code)
                 let message = status.userString ?? status.resultString ?? status.errorString ?? "Apple Developer Portal Error"
                 if let customError = resultCodeHandler?(code, message) {
                     debugLog("[SideSign] processResponse error (code: \(code)): \(customError.localizedDescription)")
@@ -507,5 +530,22 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
             debugLog("[SideSign] sendServicesRequest failed to decode \(T.self): \(error). Raw payload: \(rawStr)")
             throw ServerError.invalidResponseFormat(rawPayload: rawStr)
         }
+    }
+}
+
+// LC_PORTAL_RESPONSE_OBSERVER_V1: scalar-only, task-scoped observation. Requests,
+// response parsing and the original thrown SideSign error remain unchanged.
+public enum SideSignPortalDiagnostics {
+    @TaskLocal public static var responseObserver: (@Sendable (Int?, String?) -> Void)? = nil
+    @TaskLocal public static var resultCodeObserver: (@Sendable (Int) -> Void)? = nil
+    public static func safeProviderCode(_ value: String?) -> String? {
+        let known: Set<String> = ["ENTITY_ERROR", "ENTITY_ERROR.INVALID", "ENTITY_ERROR.ATTRIBUTE.INVALID",
+            "ENTITY_ERROR.ATTRIBUTE.REQUIRED", "ENTITY_ERROR.ATTRIBUTE.UNKNOWN",
+            "ENTITY_ERROR.RELATIONSHIP.INVALID", "ENTITY_ERROR.RELATIONSHIP.INVALID_NOT_ALLOWED",
+            "ENTITY_ERROR.ATTRIBUTE.INVALID.DUPLICATE", "FORBIDDEN_ERROR", "NOT_FOUND",
+            "PARAMETER_ERROR.INVALID", "PARAMETER_ERROR.REQUIRED", "RATE_LIMIT_EXCEEDED",
+            "SERVICE_UNAVAILABLE", "UNEXPECTED_ERROR", "UNKNOWN_ERROR"]
+        guard let value, known.contains(value) else { return nil }
+        return value
     }
 }

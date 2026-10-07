@@ -47,7 +47,7 @@ public extension DeveloperPortal {
                 case DeveloperPortalResultCodes.bundleIdentifierUnavailable:
                     debugLog("[SideSign] addAppID error: Bundle identifier unavailable (\(code)): \(message)")
                     return DeveloperPortalError.bundleIdentifierUnavailable(cause: message)
-                case DeveloperPortalResultCodes.maximumAppIDLimitReached:
+                case DeveloperPortalResultCodes.maximumAppIDLimitReached, 9120: // LC_APP_ID_LIMIT_9120_V1
                     debugLog("[SideSign] addAppID error: Maximum App ID limit reached (\(code)): \(message)")
                     return DeveloperPortalError.maximumAppIDLimitReached(cause: message)
                 default: return nil
