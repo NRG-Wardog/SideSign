@@ -33,6 +33,13 @@ DEPENDENCY_FILES = {'SideSign': {'Package.swift', LOCKS['SideSign']},
 TEST_FILES = {'SideSign': set(), 'SideStore': {'tests/runtime_source/test_runtime_source.py'}}
 ADDITIONS = {'.ci/production-dependencies.py', '.ci/production-dependencies.json',
              '.ci/test_production_dependencies.py', '.ci/PRODUCTION_DEPENDENCIES.md'}
+DIAGNOSTIC_ACCEPTED = {'commit': '06351a87d44ff8faa7d5a2e8c7ed3096fff73d2c',
+                       'tree': 'a773b5461f43b4a28d0d34f7c1acd8728a9f8c6f'}
+DIAGNOSTIC_ANISETTE = 'e530b84687ebea2e7d1115119e1a6d18372de14b'
+DIAGNOSTIC_REGISTRY_SHA256 = '97c9d0b81e9b59c8271ae1155393b2fcb534dc97ea367095d3adfcde8a3783ad'
+DIAGNOSTIC_METADATA = {'.ci/production-dependencies.py',
+                       '.ci/test_diagnostic_dependencies.py',
+                       '.ci/DIAGNOSTIC_DEPENDENCIES.md'}
 
 
 class ProofError(ValueError):
@@ -159,6 +166,45 @@ def verify_native_lineage(root, spec, current):
     return receipt
 
 
+
+def verify_working_blob(root, path, entry, data):
+    mode, kind, oid = entry
+    target = root / path
+    actual_mode = target.lstat().st_mode
+    if mode == '120000':
+        require(stat.S_ISLNK(actual_mode) and os.fsencode(os.readlink(target)) == data[oid], 'Symlink drift: ' + path)
+    else:
+        require(stat.S_ISREG(actual_mode), 'Nonregular working file: ' + path)
+        require(('100755' if actual_mode & 0o111 else '100644') == mode, 'Working mode drift: ' + path)
+        require(target.read_bytes() == data[oid], 'Uncommitted bytes: ' + path)
+
+
+def verify_working_inventory(root, after):
+    links = {p:e[2] for p,e in after.items() if e[0] == "160000"}
+    files = set()
+    for directory, dirs, names in os.walk(root, followlinks=False):
+        rel = Path(directory).relative_to(root)
+        for name in list(dirs):
+            path = rel / name
+            if path.as_posix() == '.git' or path.as_posix() in links:
+                dirs.remove(name)
+            elif (root / path).is_symlink():
+                files.add(path.as_posix())
+                dirs.remove(name)
+        files.update((rel / name).as_posix() for name in names
+                     if (rel / name).as_posix() != ".git")
+    require(files == set(after) - set(links), 'Working inventory drift')
+    index = {}
+    for row in git(root, 'ls-files', '--stage', '-z').split(b'\0'):
+        if row:
+            header, path = row.split(b'\t', 1)
+            mode, oid, stage = header.decode().split()
+            require(stage == '0', 'Unmerged index')
+            index[os.fsdecode(path)] = (mode, oid)
+    require(index == {p:(e[0],e[2]) for p,e in after.items()}, 'Index differs from HEAD')
+    require(not git(root, 'status', '--porcelain', '--untracked-files=all').strip(), 'Dirty repository')
+
+
 def verify(root, *, allow_pending_child_pins=False):
     root = Path(root).resolve(strict=True)
     spec = json.loads(read_regular(root / '.ci/production-dependencies.json'))
@@ -205,36 +251,8 @@ def verify(root, *, allow_pending_child_pins=False):
             unchanged += 1
         else:
             require(mode == '100644', 'Proof metadata mode drift: ' + path)
-        target = root / path
-        actual_mode = target.lstat().st_mode
-        if mode == '120000':
-            require(stat.S_ISLNK(actual_mode) and os.fsencode(os.readlink(target)) == data[oid], 'Symlink drift: ' + path)
-        else:
-            require(stat.S_ISREG(actual_mode), 'Nonregular working file: ' + path)
-            require(('100755' if actual_mode & 0o111 else '100644') == mode, 'Working mode drift: ' + path)
-            require(target.read_bytes() == data[oid], 'Uncommitted bytes: ' + path)
-    files = set()
-    for directory, dirs, names in os.walk(root, followlinks=False):
-        rel = Path(directory).relative_to(root)
-        for name in list(dirs):
-            path = rel / name
-            if path.as_posix() == '.git' or path.as_posix() in links:
-                dirs.remove(name)
-            elif (root / path).is_symlink():
-                files.add(path.as_posix())
-                dirs.remove(name)
-        files.update((rel / name).as_posix() for name in names
-                     if (rel / name).as_posix() != ".git")
-    require(files == set(after) - set(links), 'Working inventory drift')
-    index = {}
-    for row in git(root, 'ls-files', '--stage', '-z').split(b'\0'):
-        if row:
-            header, path = row.split(b'\t', 1)
-            mode, oid, stage = header.decode().split()
-            require(stage == '0', 'Unmerged index')
-            index[os.fsdecode(path)] = (mode, oid)
-    require(index == {p:(e[0],e[2]) for p,e in after.items()}, 'Index differs from HEAD')
-    require(not git(root, 'status', '--porcelain', '--untracked-files=all').strip(), 'Dirty repository')
+        verify_working_blob(root, path, entry, data)
+    verify_working_inventory(root, after)
     lockpath = LOCKS[owner]
     frozen_pins = verify_lock(json.loads(data[after[lockpath][2]]), json.loads(data[before[lockpath][2]]))
     receipt = verify_resolver_receipt(root, spec, data[after[lockpath][2]])
@@ -274,9 +292,210 @@ def verify(root, *, allow_pending_child_pins=False):
             'runtime_behavior_changes':[]}
 
 
+def exact_keys(value, keys, message):
+    require(isinstance(value, dict) and set(value) == set(keys), message)
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        require(key not in result, 'Duplicate JSON key: ' + key)
+        result[key] = value
+    return result
+
+
+def approved_external_json(root, path, approved_sha256, label):
+    require(path is not None and isinstance(approved_sha256, str) and
+            re.fullmatch('[0-9a-f]{64}', approved_sha256),
+            label + ' requires a separately approved SHA256')
+    path = Path(path).resolve(strict=True)
+    require(not path.is_relative_to(root), label + ' must be external to the owner checkout')
+    encoded = read_regular(path)
+    require(sha(encoded) == approved_sha256, label + ' SHA256 mismatch')
+    return json.loads(encoded, object_pairs_hook=unique_object)
+
+
+def diagnostic_row(entry, data):
+    if entry is None:
+        return None
+    mode, kind, oid = entry
+    require(kind == 'blob', 'Diagnostic transition requires blob objects')
+    return {'mode': mode, 'blob': oid, 'sha256': sha(data[oid])}
+
+
+def observed_origin_hash(lock):
+    present = 'originHash' in lock
+    value = lock.get('originHash')
+    require(not present or (isinstance(value, str) and
+            re.fullmatch('[0-9a-f]{64}', value)), 'Invalid observed originHash')
+    return {'present': present, 'value': value}
+
+
+def verify_diagnostic_resolver(root, receipt, lock_bytes, baseline_bytes, after):
+    exact_keys(receipt, {'schema_version', 'owner', 'purpose', 'run_url', 'run_attempt',
+        'resolver_tested_commit', 'resolver_tested_tree', 'lock_sha256', 'origin_hash',
+        'toolchain', 'command', 'evidence_sha256'}, 'Unexpected diagnostic resolver receipt schema')
+    require(type(receipt['schema_version']) is int and receipt['schema_version'] == 1 and
+            receipt['owner'] == 'SideSign' and
+            receipt['purpose'] == 'diagnostic_swiftpm_resolution',
+            'Unexpected diagnostic resolver receipt identity')
+    require(isinstance(receipt['run_url'], str) and re.fullmatch(
+            r'https://github.com/NRG-Wardog/[A-Za-z0-9_.-]+/actions/runs/[1-9][0-9]*',
+            receipt['run_url']) and type(receipt['run_attempt']) is int and
+            receipt['run_attempt'] > 0, 'Invalid diagnostic resolver run identity')
+    exact_keys(receipt['toolchain'], {'xcode', 'swift'}, 'Missing observed resolver toolchain')
+    require(all(isinstance(v, str) and v.strip() for v in receipt['toolchain'].values()),
+            'Missing observed resolver toolchain')
+    require(isinstance(receipt['command'], list) and receipt['command'] and
+            all(isinstance(v, str) and v for v in receipt['command']), 'Missing resolver command')
+    exact_keys(receipt['evidence_sha256'], {'resolver_log', 'resolution_before', 'resolution_after'},
+               'Missing diagnostic resolver evidence digests')
+    require(all(isinstance(v, str) and re.fullmatch('[0-9a-f]{64}', v)
+                for v in receipt['evidence_sha256'].values()), 'Invalid resolver evidence digest')
+    tested = receipt['resolver_tested_commit']
+    require(isinstance(tested, str) and re.fullmatch('[0-9a-f]{40}', tested) and
+            isinstance(receipt['resolver_tested_tree'], str) and
+            re.fullmatch('[0-9a-f]{40}', receipt['resolver_tested_tree']),
+            'Invalid diagnostic resolver-tested identity')
+    git(root, 'merge-base', '--is-ancestor', tested, 'HEAD')
+    require(git(root, 'rev-parse', tested + '^{tree}').decode().strip() ==
+            receipt['resolver_tested_tree'], 'Diagnostic resolver-tested tree mismatch')
+    tested_inventory = inventory(root, tested)
+    require(set(tested_inventory) == set(after) and all(
+            tested_inventory[p] == entry for p, entry in after.items() if p != 'Package.resolved'),
+            'Candidate differs from resolver-tested source outside captured lock')
+    require(git(root, 'show', tested + ':Package.resolved') == baseline_bytes,
+            'Resolver did not start from the accepted lock')
+    require(receipt['lock_sha256'] == sha(lock_bytes), 'Resolver-observed lock SHA256 mismatch')
+    exact_keys(receipt['origin_hash'], {'present', 'value'}, 'Missing observed originHash state')
+    require(type(receipt['origin_hash']['present']) is bool and
+            receipt['origin_hash'] == observed_origin_hash(json.loads(lock_bytes)),
+            'Resolver-observed originHash mismatch')
+
+
+def verify_diagnostic_lock(lock_bytes, baseline_bytes):
+    """Check source identity only; changed bytes still require a reviewed receipt."""
+    baseline = json.loads(baseline_bytes, object_pairs_hook=unique_object)
+    current = json.loads(lock_bytes, object_pairs_hook=unique_object)
+    require(set(current) in ({'pins', 'version'}, {'pins', 'version', 'originHash'}) and
+            type(current['version']) is int and current['version'] == baseline['version'] == 3,
+            'Diagnostic lock schema drift')
+    observed_origin_hash(current)
+    expected = pin_map(baseline)
+    require(len(expected) == 6, 'Accepted SideSign lock must have exactly six pins')
+    if lock_bytes != baseline_bytes:
+        expected['anisettekit'] = {'identity': 'anisettekit', 'kind': 'remoteSourceControl',
+            'location': ANISETTE_URL, 'state': {'revision': DIAGNOSTIC_ANISETTE}}
+    require(pin_map(current) == expected, 'Diagnostic SwiftPM pin drift outside exact AnisetteKit transition')
+    return len(expected) - 1
+
+
+def verify_diagnostic(root, *, basis_path, basis_sha256,
+                      resolver_receipt_path=None, resolver_receipt_sha256=None):
+    """A separately reviewed source transition; never a native readiness claim."""
+    root = Path(root).resolve(strict=True)
+    basis = approved_external_json(root, basis_path, basis_sha256, 'Diagnostic basis')
+    exact_keys(basis, {'schema_version', 'owner', 'purpose', 'source_registry_sha256',
+                      'accepted', 'candidate', 'anisette', 'changes'},
+               'Unexpected diagnostic source basis schema; outcomes belong in separate receipts')
+    require(type(basis['schema_version']) is int and basis['schema_version'] == 1 and
+            basis['owner'] == 'SideSign' and
+            basis['purpose'] == 'diagnostic_dependency_source_transition',
+            'Unexpected diagnostic basis identity')
+    require(basis['source_registry_sha256'] == DIAGNOSTIC_REGISTRY_SHA256,
+            'Unexpected diagnostic source registry')
+    require(basis['accepted'] == DIAGNOSTIC_ACCEPTED, 'Unexpected accepted production base')
+    require(basis['anisette'] == {'repository': ANISETTE_URL, 'accepted_commit': ANISETTE,
+            'diagnostic_commit': DIAGNOSTIC_ANISETTE}, 'Unexpected diagnostic AnisetteKit pin')
+    exact_keys(basis['candidate'], {'commit', 'tree'}, 'Unexpected diagnostic candidate schema')
+    require(git(root, 'rev-parse', '--is-shallow-repository').strip() == b'false', 'Shallow history')
+    accepted = DIAGNOSTIC_ACCEPTED['commit']
+    git(root, 'merge-base', '--is-ancestor', accepted, 'HEAD')
+    require(git(root, 'rev-parse', accepted + '^{tree}').decode().strip() ==
+            DIAGNOSTIC_ACCEPTED['tree'], 'Accepted production tree mismatch')
+    commit = git(root, 'rev-parse', 'HEAD').decode().strip()
+    tree = git(root, 'rev-parse', 'HEAD^{tree}').decode().strip()
+    require(basis['candidate'] == {'commit': commit, 'tree': tree},
+            'Diagnostic candidate commit/tree mismatch')
+    before, after = inventory(root, accepted), inventory(root, 'HEAD')
+    additions = DIAGNOSTIC_METADATA - set(before)
+    require(set(after) == set(before) | additions, 'Diagnostic committed inventory drift')
+    changed = {p for p in set(before) | set(after) if before.get(p) != after.get(p)}
+    require(changed <= DIAGNOSTIC_METADATA | {'Package.swift', 'Package.resolved'},
+            'Diagnostic change outside exact dependency/verifier metadata scope')
+    require(DIAGNOSTIC_METADATA | {'Package.swift'} <= changed,
+            'Missing reviewed diagnostic metadata or manifest transition')
+    require(isinstance(basis['changes'], dict) and set(basis['changes']) == changed,
+            'Diagnostic basis changed-path inventory mismatch')
+    data = blobs(root, {oid for mode, kind, oid in list(before.values()) + list(after.values())
+                       if kind == 'blob'})
+    for path, entry in after.items():
+        if path in changed:
+            require(entry[:2] == ('100644', 'blob'), 'Diagnostic transition file type/mode drift: ' + path)
+            require(basis['changes'][path] == {'before': diagnostic_row(before.get(path), data),
+                    'after': diagnostic_row(entry, data)}, 'Diagnostic basis blob/mode/hash mismatch: ' + path)
+        else:
+            require(entry == before[path], 'Diagnostic frozen blob/mode changed: ' + path)
+        if entry[0] != '160000':
+            require(entry[1] == 'blob', 'Unsupported committed object: ' + path)
+            verify_working_blob(root, path, entry, data)
+    verify_working_inventory(root, after)
+    original = data[before['Package.swift'][2]]
+    old = ('.package(url: "' + ANISETTE_URL + '", revision: "' + ANISETTE + '"),').encode()
+    new = ('.package(url: "' + ANISETTE_URL + '", revision: "' + DIAGNOSTIC_ANISETTE + '"),').encode()
+    require(original.count(old) == 1 and data[after['Package.swift'][2]] == original.replace(old, new),
+            'Diagnostic manifest changes exceed exact AnisetteKit revision')
+    lock_bytes = data[after['Package.resolved'][2]]
+    baseline_bytes = data[before['Package.resolved'][2]]
+    frozen_pins = verify_diagnostic_lock(lock_bytes, baseline_bytes)
+    receipt = None
+    if lock_bytes == baseline_bytes:
+        require(resolver_receipt_path is None and resolver_receipt_sha256 is None,
+                'Pending unchanged lock cannot claim a diagnostic resolver receipt')
+        lock_status = 'accepted_lock_retained_pending_resolution'
+    else:
+        receipt = approved_external_json(root, resolver_receipt_path, resolver_receipt_sha256,
+                                         'Diagnostic resolver receipt')
+        verify_diagnostic_resolver(root, receipt, lock_bytes, baseline_bytes, after)
+        lock_status = 'reviewed_resolver_observed_lock'
+    return {'owner': 'SideSign', 'status': 'diagnostic_dependency_transition_pass',
+            'accepted': dict(DIAGNOSTIC_ACCEPTED), 'commit': commit, 'tree': tree,
+            'diagnostic_basis_sha256': basis_sha256,
+            'source_registry_sha256': DIAGNOSTIC_REGISTRY_SHA256,
+            'dependency_files': sorted(changed - DIAGNOSTIC_METADATA),
+            'reviewed_metadata_files': sorted(DIAGNOSTIC_METADATA),
+            'unchanged_accepted_blobs': sum(1 for p in after if p not in changed and after[p][1] == 'blob'),
+            'unrelated_swiftpm_pins_preserved': frozen_pins,
+            'lock_status': lock_status, 'lock_sha256': sha(lock_bytes),
+            'origin_hash': observed_origin_hash(json.loads(lock_bytes)),
+            'native_resolver_status': 'reviewed_diagnostic_resolution' if receipt else 'not_run_for_candidate',
+            'resolver_receipt_sha256': resolver_receipt_sha256,
+            'resolver_tested_commit': receipt['resolver_tested_commit'] if receipt else None,
+            'resolver_tested_tree': receipt['resolver_tested_tree'] if receipt else None,
+            'resolver_run_url': receipt['run_url'] if receipt else None,
+            'native_validation_status': 'not_established_for_candidate',
+            'historical_receipts_only': True,
+            'readiness_scope': 'source_transition_only_requires_separate_native_receipt',
+            'production_ready': False, 'runtime_source_changes': []}
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--allow-pending-child-pins', action='store_true', help='Report preparation only; cannot establish cutover readiness')
+    parser.add_argument('--diagnostic-basis', type=Path, help='External immutable diagnostic source transition basis')
+    parser.add_argument('--diagnostic-basis-sha256', help='Separately reviewed SHA256 of exact basis bytes')
+    parser.add_argument('--diagnostic-resolver-receipt', type=Path, help='External reviewed receipt for actual changed resolver lock')
+    parser.add_argument('--diagnostic-resolver-receipt-sha256', help='Separately reviewed SHA256 of exact resolver receipt bytes')
     args = parser.parse_args()
-    print(json.dumps(verify(args.root, allow_pending_child_pins=args.allow_pending_child_pins), indent=2))
+    if any(value is not None for value in (args.diagnostic_basis, args.diagnostic_basis_sha256,
+            args.diagnostic_resolver_receipt, args.diagnostic_resolver_receipt_sha256)):
+        if args.allow_pending_child_pins:
+            parser.error('--allow-pending-child-pins cannot be combined with diagnostic mode')
+        result = verify_diagnostic(args.root, basis_path=args.diagnostic_basis,
+            basis_sha256=args.diagnostic_basis_sha256,
+            resolver_receipt_path=args.diagnostic_resolver_receipt,
+            resolver_receipt_sha256=args.diagnostic_resolver_receipt_sha256)
+    else:
+        result = verify(args.root, allow_pending_child_pins=args.allow_pending_child_pins)
+    print(json.dumps(result, indent=2))
