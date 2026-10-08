@@ -28,7 +28,7 @@ class DiagnosticTests(unittest.TestCase):
         for path in PROOF.DIAGNOSTIC_METADATA:
             (self.root / path).write_bytes((ROOT / path).read_bytes())
         manifest = self.root / 'Package.swift'
-        manifest.write_bytes(manifest.read_bytes().replace(PROOF.ANISETTE.encode(), PROOF.DIAGNOSTIC_ANISETTE.encode()))
+        manifest.write_bytes(manifest.read_bytes().replace(PROOF.DIAGNOSTIC_ACCEPTED_ANISETTE.encode(), PROOF.DIAGNOSTIC_ANISETTE.encode()))
         self.commit()
         self.basis_path = self.folder / 'basis.json'
         self.receipt_path = None
@@ -60,7 +60,7 @@ class DiagnosticTests(unittest.TestCase):
             'accepted': dict(PROOF.DIAGNOSTIC_ACCEPTED),
             'candidate': {'commit': self.raw_git('rev-parse', 'HEAD').decode().strip(),
                           'tree': self.raw_git('rev-parse', 'HEAD^{tree}').decode().strip()},
-            'anisette': {'repository': PROOF.ANISETTE_URL, 'accepted_commit': PROOF.ANISETTE,
+            'anisette': {'repository': PROOF.ANISETTE_URL, 'accepted_commit': PROOF.DIAGNOSTIC_ACCEPTED_ANISETTE,
                          'diagnostic_commit': PROOF.DIAGNOSTIC_ANISETTE}, 'changes': changes}
         self.save_basis()
 
@@ -80,6 +80,7 @@ class DiagnosticTests(unittest.TestCase):
         tested = copy.deepcopy(self.basis['candidate'])
         lock = json.loads((self.root / 'Package.resolved').read_bytes())
         PROOF.pin_map(lock)['anisettekit']['state']['revision'] = PROOF.DIAGNOSTIC_ANISETTE
+        lock.pop('originHash', None)  # Synthetic fixtures exercise both observed states.
         if origin_hash is not None:
             lock['originHash'] = origin_hash
         (self.root / 'Package.resolved').write_text(json.dumps(lock, indent=2) + '\n')
@@ -110,7 +111,7 @@ class DiagnosticTests(unittest.TestCase):
         self.assertFalse(proof['production_ready'])
         self.assertEqual(proof['native_validation_status'], 'not_established_for_candidate')
         self.assertTrue(proof['historical_receipts_only'])
-        self.assertEqual(proof['origin_hash'], {'present': False, 'value': None})
+        self.assertEqual(proof['origin_hash'], {'present': True, 'value': 'bb455ddecee6dd87515ad39430fb70884354ec92f5be4888e17f2fc71bbdc852'})
         self.assertEqual(proof['runtime_source_changes'], [])
 
     def test_default_gate_rejects_diagnostic_candidate(self):
@@ -130,8 +131,8 @@ class DiagnosticTests(unittest.TestCase):
                 result = subprocess.run(command + options, capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
 
-    def test_default_gate_still_accepts_accepted_graph(self):
-        self.raw_git('checkout', '--quiet', '--detach', PROOF.DIAGNOSTIC_ACCEPTED['commit'])
+    def test_default_gate_still_accepts_legacy_graph(self):
+        self.raw_git('checkout', '--quiet', '--detach', '06351a87d44ff8faa7d5a2e8c7ed3096fff73d2c')
         proof = PROOF.verify(self.root)
         self.assertEqual(proof['status'], 'exact_dependency_transition_pass')
         self.assertTrue(proof['production_ready'])
@@ -175,6 +176,18 @@ class DiagnosticTests(unittest.TestCase):
         self.basis['anisette']['diagnostic_commit'] = PROOF.ANISETTE
         self.save_basis()
         with self.assertRaisesRegex(PROOF.ProofError, 'AnisetteKit pin'):
+            self.prove()
+
+    def test_unreviewed_registry_placeholder_is_rejected(self):
+        with patch.object(PROOF, 'DIAGNOSTIC_REGISTRY_SHA256', None):
+            with self.assertRaisesRegex(PROOF.ProofError, 'registry awaiting reviewed hash'):
+                self.prove()
+
+    def test_diagnostic_accepted_pin_cannot_reuse_legacy_default_pin(self):
+        self.assertNotEqual(PROOF.DIAGNOSTIC_ACCEPTED_ANISETTE, PROOF.ANISETTE)
+        self.basis['anisette']['accepted_commit'] = PROOF.ANISETTE
+        self.save_basis()
+        with self.assertRaisesRegex(PROOF.ProofError, 'diagnostic AnisetteKit pin'):
             self.prove()
 
     def test_wrong_candidate_commit_and_tree_rejected(self):

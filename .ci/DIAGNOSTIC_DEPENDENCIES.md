@@ -1,14 +1,15 @@
-# Explicit ADI diagnostic dependency proof
+# Explicit ADI v2 staging-order dependency proof
 
 The diagnostic candidate changes only SideSign's AnisetteKit manifest revision
-from `62ce85c8798d8eab8e29752aba7dc9f1f6a5b80d` to
-`e530b84687ebea2e7d1115119e1a6d18372de14b`, plus this document, the diagnostic
+from `e530b84687ebea2e7d1115119e1a6d18372de14b` to
+`f494494ede88890555df345054f7fbb87b53aea5`, plus this document, the diagnostic
 tests, and the existing dependency verifier. Every runtime, license, historical
 parity proof, and accepted receipt remains byte-for-byte unchanged from accepted
-SideSign `06351a87d44ff8faa7d5a2e8c7ed3096fff73d2c`, tree
-`a773b5461f43b4a28d0d34f7c1acd8728a9f8c6f`.
+SideSign `3bd4afa0addbf95a8666ac91d8bfcf99f5182eea`, tree
+`27329eab36999128b046eabad7a175faf71b03b0`.
 
-The initial `Package.resolved` is deliberately the exact accepted lock, still
+The initial `Package.resolved` is deliberately the exact prior resolver lock
+(SHA256 `6dfda241326cf0af7b9b77978d3890b28d5205545fb65b6807d6706822a848fb`), still
 pinning the old AnisetteKit revision. This is a pending-resolution source
 candidate, not a resolved graph or native success. Never edit the lock by hand
 to make the manifest and lock agree. Only genuine target-macOS resolver output
@@ -30,25 +31,26 @@ The reviewer must supply an independently approved SHA256; calculating a new
 hash of unreviewed input does not constitute approval. Both external files must
 be ordinary non-executable files outside the owner checkout. The gate reads
 them without modifying anything or using the network. Its source registry
-identity is `97c9d0b81e9b59c8271ae1155393b2fcb534dc97ea367095d3adfcde8a3783ad`.
+identity is `2333ff8e03dea9fa4b8620e64e15ec76cb6a870a2d61c42dd057ddce0c13354f`.
 
-The strict JSON schema contains exactly these keys:
+The integration selects `maintained-adi-consumption-v2`; the owner basis schema
+stays unchanged and gains no outcome fields. The strict JSON schema contains exactly these keys:
 
 ```json
 {
   "schema_version": 1,
   "owner": "SideSign",
   "purpose": "diagnostic_dependency_source_transition",
-  "source_registry_sha256": "97c9d0b81e9b59c8271ae1155393b2fcb534dc97ea367095d3adfcde8a3783ad",
+  "source_registry_sha256": "2333ff8e03dea9fa4b8620e64e15ec76cb6a870a2d61c42dd057ddce0c13354f",
   "accepted": {
-    "commit": "06351a87d44ff8faa7d5a2e8c7ed3096fff73d2c",
-    "tree": "a773b5461f43b4a28d0d34f7c1acd8728a9f8c6f"
+    "commit": "3bd4afa0addbf95a8666ac91d8bfcf99f5182eea",
+    "tree": "27329eab36999128b046eabad7a175faf71b03b0"
   },
   "candidate": {"commit": "EXACT_COMMIT", "tree": "EXACT_TREE"},
   "anisette": {
     "repository": "https://github.com/NRG-Wardog/AnisetteKit.git",
-    "accepted_commit": "62ce85c8798d8eab8e29752aba7dc9f1f6a5b80d",
-    "diagnostic_commit": "e530b84687ebea2e7d1115119e1a6d18372de14b"
+    "accepted_commit": "e530b84687ebea2e7d1115119e1a6d18372de14b",
+    "diagnostic_commit": "f494494ede88890555df345054f7fbb87b53aea5"
   },
   "changes": {
     "Package.swift": {
@@ -129,8 +131,8 @@ diagnostic graph is required by the integration's later acceptance gate.
 Run `python3 -B .ci/test_diagnostic_dependencies.py` for exact source, metadata,
 pin, hash, origin-state, fake-readiness, working-tree, and index adversarial
 checks. To test default compatibility without changing frozen assertions, run
-the unchanged `.ci/test_production_dependencies.py` from an independent accepted
-checkout loading the updated verifier. Its fixture clones stay on the accepted
+the unchanged `.ci/test_production_dependencies.py` from an independent legacy production
+`06351a87d44ff8faa7d5a2e8c7ed3096fff73d2c` checkout loading the updated verifier. Its fixture clones stay on the accepted
 commit. Run historical source parity at its original checkpoint, and corrected
 source parity plus `.ci/test-source-parity.py` at
 `ed30d3989ea0f80bcb91466d6d5ca043f4366df0`. Neither old whole-tree gate should be

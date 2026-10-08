@@ -33,10 +33,11 @@ DEPENDENCY_FILES = {'SideSign': {'Package.swift', LOCKS['SideSign']},
 TEST_FILES = {'SideSign': set(), 'SideStore': {'tests/runtime_source/test_runtime_source.py'}}
 ADDITIONS = {'.ci/production-dependencies.py', '.ci/production-dependencies.json',
              '.ci/test_production_dependencies.py', '.ci/PRODUCTION_DEPENDENCIES.md'}
-DIAGNOSTIC_ACCEPTED = {'commit': '06351a87d44ff8faa7d5a2e8c7ed3096fff73d2c',
-                       'tree': 'a773b5461f43b4a28d0d34f7c1acd8728a9f8c6f'}
-DIAGNOSTIC_ANISETTE = 'e530b84687ebea2e7d1115119e1a6d18372de14b'
-DIAGNOSTIC_REGISTRY_SHA256 = '97c9d0b81e9b59c8271ae1155393b2fcb534dc97ea367095d3adfcde8a3783ad'
+DIAGNOSTIC_ACCEPTED = {'commit': '3bd4afa0addbf95a8666ac91d8bfcf99f5182eea',
+                       'tree': '27329eab36999128b046eabad7a175faf71b03b0'}
+DIAGNOSTIC_ACCEPTED_ANISETTE = 'e530b84687ebea2e7d1115119e1a6d18372de14b'
+DIAGNOSTIC_ANISETTE = 'f494494ede88890555df345054f7fbb87b53aea5'
+DIAGNOSTIC_REGISTRY_SHA256 = '2333ff8e03dea9fa4b8620e64e15ec76cb6a870a2d61c42dd057ddce0c13354f'
 DIAGNOSTIC_METADATA = {'.ci/production-dependencies.py',
                        '.ci/test_diagnostic_dependencies.py',
                        '.ci/DIAGNOSTIC_DEPENDENCIES.md'}
@@ -402,10 +403,13 @@ def verify_diagnostic(root, *, basis_path, basis_sha256,
             basis['owner'] == 'SideSign' and
             basis['purpose'] == 'diagnostic_dependency_source_transition',
             'Unexpected diagnostic basis identity')
+    require(isinstance(DIAGNOSTIC_REGISTRY_SHA256, str) and
+            re.fullmatch('[0-9a-f]{64}', DIAGNOSTIC_REGISTRY_SHA256),
+            'Diagnostic source registry awaiting reviewed hash')
     require(basis['source_registry_sha256'] == DIAGNOSTIC_REGISTRY_SHA256,
             'Unexpected diagnostic source registry')
     require(basis['accepted'] == DIAGNOSTIC_ACCEPTED, 'Unexpected accepted production base')
-    require(basis['anisette'] == {'repository': ANISETTE_URL, 'accepted_commit': ANISETTE,
+    require(basis['anisette'] == {'repository': ANISETTE_URL, 'accepted_commit': DIAGNOSTIC_ACCEPTED_ANISETTE,
             'diagnostic_commit': DIAGNOSTIC_ANISETTE}, 'Unexpected diagnostic AnisetteKit pin')
     exact_keys(basis['candidate'], {'commit', 'tree'}, 'Unexpected diagnostic candidate schema')
     require(git(root, 'rev-parse', '--is-shallow-repository').strip() == b'false', 'Shallow history')
@@ -441,7 +445,7 @@ def verify_diagnostic(root, *, basis_path, basis_sha256,
             verify_working_blob(root, path, entry, data)
     verify_working_inventory(root, after)
     original = data[before['Package.swift'][2]]
-    old = ('.package(url: "' + ANISETTE_URL + '", revision: "' + ANISETTE + '"),').encode()
+    old = ('.package(url: "' + ANISETTE_URL + '", revision: "' + DIAGNOSTIC_ACCEPTED_ANISETTE + '"),').encode()
     new = ('.package(url: "' + ANISETTE_URL + '", revision: "' + DIAGNOSTIC_ANISETTE + '"),').encode()
     require(original.count(old) == 1 and data[after['Package.swift'][2]] == original.replace(old, new),
             'Diagnostic manifest changes exceed exact AnisetteKit revision')
