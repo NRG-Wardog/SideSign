@@ -70,15 +70,19 @@ class RepositoryTests(unittest.TestCase):
     def test_exact_transition_and_repeatability(self):
         first = self.prove()
         self.assertEqual(first, self.prove())
-        self.assertFalse(first['production_ready'])
+        self.assertTrue(first['production_ready'])
+        self.assertEqual(first['readiness_scope'], 'eligible_for_gated_full_build')
         self.assertEqual(first['runtime_behavior_changes'], [])
 
-    def test_resolver_report_names_tested_commit_without_claiming_readiness(self):
+    def test_resolver_and_native_reports_name_their_actual_tested_commits(self):
         proof = self.prove()
         self.assertEqual(proof['native_resolver_status'], 'passed_remote_macos')
         self.assertEqual(proof['resolver_tested_commit'], '0d451a6eca73358be8dfed6a89c4e227752d0083')
-        self.assertEqual(proof['ios_compilation'], 'NOT_RUN_PHASE_1')
-        self.assertFalse(proof['production_ready'])
+        self.assertEqual(proof['native_tested_commit'], '5ce52d12f1846e1a08fad30ed27c4cbadd176529')
+        self.assertNotEqual(proof['commit'], proof['native_tested_commit'])
+        self.assertEqual(proof['ios_compilation'], 'PASS_ON_NATIVE_TESTED_GRAPH')
+        self.assertTrue(proof['production_ready'])
+        self.assertTrue(proof['final_exact_ref_ipa_build_required'])
 
     def test_missing_resolver_receipt_rejected(self):
         path = self.root/'.ci/production-dependencies.json'
@@ -96,6 +100,35 @@ class RepositoryTests(unittest.TestCase):
         path.write_text(json.dumps(spec))
         self.commit()
         with self.assertRaisesRegex(PROOF.ProofError, 'Reviewed resolver receipt mismatch'):
+            self.prove()
+
+    def test_missing_native_receipt_rejected(self):
+        path = self.root/'.ci/production-dependencies.json'
+        spec = json.loads(path.read_text())
+        del spec['native_receipt']
+        path.write_text(json.dumps(spec))
+        self.commit()
+        with self.assertRaisesRegex(PROOF.ProofError, 'Missing reviewed native receipt'):
+            self.prove()
+
+    def test_changed_native_receipt_rejected(self):
+        path = self.root/'.ci/production-dependencies.json'
+        spec = json.loads(path.read_text())
+        spec['native_receipt']['native_tested_tree'] = '0'*40
+        path.write_text(json.dumps(spec))
+        self.commit()
+        with self.assertRaisesRegex(PROOF.ProofError, 'Reviewed native receipt mismatch'):
+            self.prove()
+
+    def test_readiness_cannot_rebaseline_a_manifest_change(self):
+        manifest = self.root/'Package.swift'
+        manifest.write_bytes(manifest.read_bytes()+b'\n// untested manifest change\n')
+        path = self.root/'.ci/production-dependencies.json'
+        spec = json.loads(path.read_text())
+        spec['dependency_files']['Package.swift']['production_sha256'] = PROOF.sha(manifest.read_bytes())
+        path.write_text(json.dumps(spec))
+        self.commit()
+        with self.assertRaisesRegex(PROOF.ProofError, 'outside readiness metadata'):
             self.prove()
 
     def test_shallow_history_rejected(self):

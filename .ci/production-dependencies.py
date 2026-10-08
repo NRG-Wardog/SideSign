@@ -25,6 +25,7 @@ ANISETTE_URL = 'https://github.com/NRG-Wardog/AnisetteKit.git'
 MINIMUXER = 'efbcab05d7d636aa37c6bf6c7f364d122c5610f6'
 # Reviewed actual Phase 1 receipt; absent originHash is intentional and verified.
 SIDESIGN_RESOLVER_RECEIPT_SHA256 = 'df64e92b500ffe949ae51d51c54d307de99424d243cae695a64be359575dee60'
+NATIVE_RECEIPT_SHA256 = 'ffb84968b58f4be5eb74ae5e08c167c86db2b9d47982db78887c2442247ace54'
 LOCKS = {'SideSign': 'Package.resolved',
          'SideStore': 'AltStore.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved'}
 DEPENDENCY_FILES = {'SideSign': {'Package.swift', LOCKS['SideSign']},
@@ -138,6 +139,26 @@ def verify_resolver_receipt(root, spec, lock_bytes):
     return receipt
 
 
+
+def verify_native_lineage(root, spec, current):
+    receipt = spec.get('native_receipt')
+    require(isinstance(receipt, dict), 'Missing reviewed native receipt')
+    encoded = json.dumps(receipt, sort_keys=True, separators=(',', ':')).encode()
+    require(sha(encoded) == NATIVE_RECEIPT_SHA256, 'Reviewed native receipt mismatch')
+    tested = receipt['native_tested_commit']
+    git(root, 'merge-base', '--is-ancestor', tested, 'HEAD')
+    require(git(root, 'rev-parse', tested + '^{tree}').decode().strip() ==
+            receipt['native_tested_tree'], 'Native-tested source tree changed')
+    native_tree = inventory(root, tested)
+    require(set(current) == set(native_tree), 'Native-tested inventory changed')
+    changed = {path for path in current if current[path] != native_tree[path]}
+    require(changed <= ADDITIONS, 'Native-tested tree changed outside readiness metadata')
+    require(receipt['readiness_scope'] == 'eligible_for_gated_full_build' and
+            receipt['final_exact_ref_ipa_build_required'] is True,
+            'Final gated build requirement changed')
+    return receipt
+
+
 def verify(root, *, allow_pending_child_pins=False):
     root = Path(root).resolve(strict=True)
     spec = json.loads(read_regular(root / '.ci/production-dependencies.json'))
@@ -217,6 +238,7 @@ def verify(root, *, allow_pending_child_pins=False):
     lockpath = LOCKS[owner]
     frozen_pins = verify_lock(json.loads(data[after[lockpath][2]]), json.loads(data[before[lockpath][2]]))
     receipt = verify_resolver_receipt(root, spec, data[after[lockpath][2]])
+    native = verify_native_lineage(root, spec, after)
     if owner == 'SideSign':
         original = data[before['Package.swift'][2]].decode()
         old = '.package(url: "https://github.com/mahee96/AnisetteKit.git",   branch: "main"),'
@@ -238,8 +260,17 @@ def verify(root, *, allow_pending_child_pins=False):
             'resolver_tested_commit':receipt['resolver_tested_commit'] if receipt else None,
             'resolver_tested_tree':receipt['resolver_tested_tree'] if receipt else None,
             'resolver_run_url':receipt['run_url'] if receipt else None,
-            'ios_compilation':'NOT_RUN_PHASE_1' if receipt else 'NOT_RUN',
-            'production_ready':False,
+            'ios_compilation':'PASS_ON_NATIVE_TESTED_GRAPH',
+            'native_tested_commit':native['native_tested_commit'],
+            'native_tested_tree':native['native_tested_tree'],
+            'native_tested_children':native['native_tested_children'],
+            'native_run_url':native['run_url'],
+            'native_validation_host_commit':native['validation_host_commit'],
+            'native_artifact_sha256':native['artifact_zip_sha256'],
+            'native_receipt_sha256':NATIVE_RECEIPT_SHA256,
+            'readiness_scope':native['readiness_scope'],
+            'final_exact_ref_ipa_build_required':True,
+            'production_ready':True,
             'runtime_behavior_changes':[]}
 
 
