@@ -48,20 +48,30 @@ public extension DeveloperPortal {
             throw DeveloperPortalError.invalidParameters(cause: "Free Apple Developer accounts cannot create \(type.displayName) certificates. Only Apple Development certificates are supported.")
         }
 
-        let certRequest: CertificateRequest
-        do {
-            certRequest = try CertificateRequest(machineName: machineName)
-        } catch {
-            debugLog("[SideSign] addCertificate error: Failed to generate CSR / RSA keypair: \(error)")
-            throw error
+        let request = try CertificateRequest(machineName: machineName)
+        return try await addCertificate(request: request, machineIdentifier: UUID().uuidString.uppercased(),
+                                        type: type, to: team, session: session)
+    }
+
+    // The caller retains this exact request before submitting it. This overload
+    // never generates replacement key material or a replacement machine ID.
+    func addCertificate(request certRequest: CertificateRequest, machineIdentifier: String,
+                        type: CertificateType, to team: Team, session: Session) async throws -> KeyStore {
+        guard !certRequest.privateKey.isEmpty, !certRequest.csrData.isEmpty,
+              UUID(uuidString: machineIdentifier) != nil else {
+            throw DeveloperPortalError.invalidParameters(cause: "Invalid prepared certificate request.")
         }
+        if team.type == .free && type.isPaidOnly {
+            throw DeveloperPortalError.invalidParameters(cause: "This certificate type requires a paid account.")
+        }
+        let machineName = certRequest.machineName
 
         let csrString = String(decoding: certRequest.csrData, as: UTF8.self)
 
         let parameters = [
             "csrContent": csrString,
             "machineName": machineName,
-            "machineId": UUID().uuidString.uppercased()
+            "machineId": machineIdentifier
         ]
 
         let submitURL: URL
