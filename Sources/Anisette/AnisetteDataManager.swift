@@ -428,7 +428,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
                cache.identifier == identifier,
                Date().timeIntervalSince(cache.timestamp) < Constants.Anisette.remoteCacheDuration 
             {
-                debugLog("[AnisetteDataManager] Reusing cached remote Anisette data for \(serverURL.absoluteString) (age: \(String(format: "%.1fs", Date().timeIntervalSince(cache.timestamp))))")
+                debugLog("[AnisetteDataManager] Reusing cached remote Anisette data.")
                 return (cache.data, cache.newAdiBlob)
             }
         }
@@ -522,12 +522,12 @@ public final class AnisetteDataManager: @unchecked Sendable {
         let start = (startIndex >= 0 && startIndex < servers.count) ? startIndex : 0
         var lastError: Error?
 
-        debugLog("[Anisette Failover] Starting failover across \(servers.count) servers (start index: \(start))...")
+        debugLog("[Anisette Failover] Starting failover.")
 
         for triedCount in 0..<servers.count {
             let currentIndex = (start + triedCount) % servers.count
             let serverURL = servers[currentIndex]
-            debugLog("[Anisette Failover] Attempting server [\(triedCount + 1)/\(servers.count)]: \(serverURL.absoluteString)...")
+            debugLog("[Anisette Failover] Attempting a configured server.")
             do {
                 let result = try await fetchAnisetteData(
                     mode: .remote(server: serverURL),
@@ -536,16 +536,16 @@ public final class AnisetteDataManager: @unchecked Sendable {
                     headers: headers,
                     onError: onError
                 )
-                debugLog("[Anisette Failover] Successfully acquired Anisette data from \(serverURL.absoluteString)")
+                debugLog("[Anisette Failover] Acquired Anisette data.")
                 onSuccess?(serverURL)
                 return result
             } catch {
                 lastError = error
-                debugLog("[Anisette Failover] Server [\(triedCount + 1)/\(servers.count)] '\(serverURL.absoluteString)' failed: \(error.localizedDescription)")
+                debugLog("[Anisette Failover] Server attempt failed.")
             }
         }
 
-        debugLog("[Anisette Failover] All \(servers.count) servers failed. Last error: \(lastError?.localizedDescription ?? "unknown")")
+        debugLog("[Anisette Failover] All configured servers failed.")
         throw lastError ?? AnisetteError.allServersFailed
     }
 
@@ -631,7 +631,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
         if let expectedSHA = oda.sha256, !expectedSHA.isEmpty {
             let zipSHA = computeSHA256(data: zipData)
             if zipSHA.caseInsensitiveCompare(expectedSHA) != .orderedSame {
-                debugLog("[AnisetteDataManager] SHA-256 mismatch (expected: \(expectedSHA), actual: \(zipSHA)). Proceeding with extraction.")
+                debugLog("[AnisetteDataManager] SHA-256 mismatch. Proceeding with extraction.")
             }
         }
 
@@ -680,7 +680,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
     public func setupFromRemote(serverSourceURL: URL, fallbackODAURL: URL? = nil, force: Bool = false, clientInfo: String = Constants.Anisette.defaultClientInfo) async throws {
         let targetLibDir = remoteLibsDir
         if !force && AnisetteClient.validateLibrariesExist(at: targetLibDir, requiredLibraries: Constants.Anisette.Libraries.requiredNames) {
-            debugLog("[AnisetteDataManager] Remote libraries already present in \(targetLibDir.path), using cache.")
+            debugLog("[AnisetteDataManager] Remote libraries already present, using cache.")
             return
         }
         let odaInfo = try await fetchODAInfo(from: serverSourceURL, fallbackODAURL: fallbackODAURL)

@@ -12,19 +12,11 @@ public extension DeveloperPortal {
 
     func fetchDevices(for team: Team, types: DeviceType = .all, session: Session) async throws -> [Device] {
         debugLog("[SideSign] fetchDevices starting...")
-        verboseLog("[SideSign] Team: \(team.name) (\(team.identifier))")
 
         let response: ListDevicesResponse = try await sendRequest(url: Constants.URLs.listDevices, session: session, team: team)
 
         let devices = (response.devices ?? []).filter { types.contains($0.type) }
 
-        debugLog("[SideSign] fetchDevices completed with \(devices.count) device(s)")
-        if !devices.isEmpty {
-            let list = devices.enumerated().map { "  \($0.offset + 1). \($0.element.name) (\($0.element.identifier))" }.joined(separator: "\n")
-            verboseLog("[SideSign] Devices (\(devices.count)):\n\(list)")
-        } else {
-            verboseLog("[SideSign] Devices: []")
-        }
         return devices
     }
 
@@ -35,7 +27,6 @@ public extension DeveloperPortal {
                         session: Session) async throws -> Device
     {
         debugLog("[SideSign] registerDevice starting...")
-        verboseLog("[SideSign] Name: '\(name)', Identifier: '\(identifier)', Type: \(type), Team: \(team.name)")
 
         var parameters = [
             "deviceNumber": identifier,
@@ -57,7 +48,6 @@ public extension DeveloperPortal {
             resultCodeHandler: { code, message in
                 switch code {
                 case DeveloperPortalResultCodes.deviceAlreadyRegistered:
-                    debugLog("[SideSign] registerDevice: device already registered (\(code)): \(message)")
                     return DeveloperPortalError.deviceAlreadyRegistered(cause: message)
                 default: return nil
                 }
@@ -70,13 +60,11 @@ public extension DeveloperPortal {
         }
 
         debugLog("[SideSign] registerDevice succeeded")
-        verboseLog("[SideSign] Registered: \(device.name) (\(device.identifier))")
         return device
     }
 
     func updateDevice(_ device: Device, team: Team, session: Session) async throws -> Device {
         debugLog("[SideSign] updateDevice starting...")
-        verboseLog("[SideSign] Name: '\(device.name)', Identifier: '\(device.identifier)', Team: \(team.name)")
 
         var parameters = [
             "name": device.name,
@@ -103,7 +91,6 @@ public extension DeveloperPortal {
 
     func disableDevice(_ device: Device, team: Team, session: Session) async throws -> Device {
         debugLog("[SideSign] disableDevice starting...")
-        verboseLog("[SideSign] Identifier: '\(device.identifier)', Team: \(team.name)")
 
         var parameters = [
             "deviceNumber": device.identifier,
@@ -131,7 +118,6 @@ public extension DeveloperPortal {
 
     func deleteDevice(_ device: Device, team: Team, session: Session) async throws -> Bool {
         debugLog("[SideSign] deleteDevice starting...")
-        verboseLog("[SideSign] Identifier: '\(device.identifier)', Team: \(team.name)")
 
         var parameters = [
             "deviceNumber": device.identifier

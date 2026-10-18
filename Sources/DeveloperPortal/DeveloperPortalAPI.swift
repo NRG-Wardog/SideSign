@@ -282,19 +282,13 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
     }
 
     public func fetchAccount(session: Session) async throws -> Account {
-        debugLog("[SideSign] fetchAccount starting...")
-        verboseLog("[SideSign] DSID: \(session.dsid)")
-
         let response: ViewDeveloperResponse = try await sendRequest(url: Constants.URLs.viewDeveloper, session: session)
 
         guard let developer = response.developer else {
-            debugLog("[SideSign] fetchAccount error: Missing developer account information in response")
             throw ServerError.badServerResponse(reason: "Missing developer account information", jsonPayload: "")
         }
 
         let account = developer.toAccount()
-        debugLog("[SideSign] fetchAccount succeeded")
-        verboseLog("[SideSign] Account: \(account.name) (\(account.appleID))")
         return account
     }
 
@@ -353,16 +347,10 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
-        verboseLog("[SideSign] sendRequest: \(url.absoluteString)")
-        if let allHeaders = request.allHTTPHeaderFields {
-            verboseLog("[SideSign] sendRequest HTTP headers: \(prettyJSONString(from: sanitizeHeadersForLogging(allHeaders)))")
-        }
-
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            debugLog("[SideSign] sendRequest network error: \(error)")
             throw error
         }
 
@@ -376,29 +364,21 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
                     return empty
                 }
             }
-            debugLog("[SideSign] sendRequest server returned 0 bytes (HTTP \(statusCode))")
             throw ServerError.badServerResponse(reason: "Server returned empty response (Content-Length: 0)", jsonPayload: "0 bytes")
-        }
-
-        if let payloadString = formatPayload(data) {
-            verboseLog("[SideSign] sendRequest response: \(payloadString)")
         }
 
         if let status = (try? PropertyListDecoder().decode(DeveloperPortalStatusResponse.self, from: data))
             ?? (try? JSONDecoder().decode(DeveloperPortalStatusResponse.self, from: data)) {
             if let errors = status.errors, let firstError = errors.first, let detail = firstError.detail {
                 SideSignPortalDiagnostics.responseObserver?(httpResponse?.statusCode, SideSignPortalDiagnostics.safeProviderCode(firstError.code))
-                debugLog("[SideSign] processResponse parsed Apple developer API error: \(detail)")
                 throw ServerError.underlyingError(code: -1, message: detail)
             }
             if let code = status.resultCode, code != DeveloperPortalResultCodes.success {
                 SideSignPortalDiagnostics.resultCodeObserver?(code)
                 let message = status.userString ?? status.resultString ?? status.errorString ?? "Apple Developer Portal Error"
                 if let customError = resultCodeHandler?(code, message) {
-                    debugLog("[SideSign] processResponse error (code: \(code)): \(customError.localizedDescription)")
                     throw customError
                 }
-                debugLog("[SideSign] processResponse error: \(message) (code: \(code))")
                 throw ServerError.underlyingError(code: code, message: message)
             }
         }
@@ -410,7 +390,6 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
             let rawStr = String(data: data, encoding: .utf8) ?? data.hexEncodedString()
-            debugLog("[SideSign] sendRequest failed to decode \(T.self): \(error). Raw payload: \(rawStr)")
             throw ServerError.invalidResponseFormat(rawPayload: rawStr)
         }
     }
@@ -467,17 +446,10 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
 
-        verboseLog("[SideSign] sendServicesRequest to: \(request.url?.absoluteString ?? "unknown URL")")
-        verboseLog("[SideSign] sendServicesRequest parameters: \(additionalParameters ?? [:])")
-        if let allHeaders = request.allHTTPHeaderFields {
-            verboseLog("[SideSign] sendServicesRequest HTTP headers: \(prettyJSONString(from: sanitizeHeadersForLogging(allHeaders)))")
-        }
-
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: request)
         } catch {
-            debugLog("[SideSign] sendServicesRequest network error: \(error)")
             throw error
         }
 
@@ -489,33 +461,24 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
         guard !data.isEmpty else {
             if isDelete || isNoContent || T.self == EmptyResponse.self {
-                verboseLog("[SideSign] sendServicesRequest: successful empty response for DELETE or \(HTTPStatusCodes.noContent)")
                 if let empty = EmptyResponse() as? T {
                     return empty
                 }
             }
-            debugLog("[SideSign] sendServicesRequest server returned 0 bytes (HTTP \(statusCode))")
             throw ServerError.badServerResponse(reason: "Server returned empty response", jsonPayload: "0 bytes")
-        }
-
-        if let payloadString = formatPayload(data) {
-            verboseLog("[SideSign] sendServicesRequest response: \(payloadString)")
         }
 
         if let status = try? JSONDecoder().decode(DeveloperPortalStatusResponse.self, from: data) {
             if let errors = status.errors, let firstError = errors.first, let detail = firstError.detail {
                 SideSignPortalDiagnostics.responseObserver?(httpResponse?.statusCode, SideSignPortalDiagnostics.safeProviderCode(firstError.code))
-                debugLog("[SideSign] processResponse parsed Apple developer API error: \(detail)")
                 throw ServerError.underlyingError(code: -1, message: detail)
             }
             if let code = status.resultCode, code != DeveloperPortalResultCodes.success {
                 SideSignPortalDiagnostics.resultCodeObserver?(code)
                 let message = status.userString ?? status.resultString ?? status.errorString ?? "Apple Developer Portal Error"
                 if let customError = resultCodeHandler?(code, message) {
-                    debugLog("[SideSign] processResponse error (code: \(code)): \(customError.localizedDescription)")
                     throw customError
                 }
-                debugLog("[SideSign] processResponse error: \(message) (code: \(code))")
                 throw ServerError.underlyingError(code: code, message: message)
             }
         }
@@ -527,7 +490,6 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
                 return empty
             }
             let rawStr = String(data: data, encoding: .utf8) ?? data.hexEncodedString()
-            debugLog("[SideSign] sendServicesRequest failed to decode \(T.self): \(error). Raw payload: \(rawStr)")
             throw ServerError.invalidResponseFormat(rawPayload: rawStr)
         }
     }

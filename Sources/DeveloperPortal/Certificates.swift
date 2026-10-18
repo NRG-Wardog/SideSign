@@ -13,7 +13,6 @@ public extension DeveloperPortal {
 
     func fetchCertificates(for team: Team, session: Session) async throws -> [X509Certificate] {
         debugLog("[SideSign] fetchCertificates starting...")
-        verboseLog("[SideSign] Team: \(team.name) (\(team.identifier)), Type: \(team.type)")
 
         let endpoint: X509Certificate.CertificateEndpoint = (team.type != .free) ? .developerPortal : .developerServices2
 
@@ -30,19 +29,11 @@ public extension DeveloperPortal {
             certificates = response.data?.compactMap { $0.toCertificate() } ?? []
         }
 
-        debugLog("[SideSign] fetchCertificates completed with \(certificates.count) certificate(s)")
-        if !certificates.isEmpty {
-            let list = certificates.enumerated().map { "  \($0.offset + 1). \($0.element.name) (\($0.element.serialNumber))" }.joined(separator: "\n")
-            verboseLog("[SideSign] Certificates (\(certificates.count)):\n\(list)")
-        } else {
-            verboseLog("[SideSign] Certificates: []")
-        }
         return certificates
     }
 
     func addCertificate(machineName: String, type: CertificateType, to team: Team, session: Session) async throws -> KeyStore {
         debugLog("[SideSign] addCertificate starting...")
-        verboseLog("[SideSign] MachineName: '\(machineName)', Type: \(type.displayName), Team: \(team.name)")
 
         if team.type == .free && type.isPaidOnly {
             throw DeveloperPortalError.invalidParameters(cause: "Free Apple Developer accounts cannot create \(type.displayName) certificates. Only Apple Development certificates are supported.")
@@ -92,7 +83,6 @@ public extension DeveloperPortal {
                 case DeveloperPortalResultCodes.invalidCertificateRequest:
                     return DeveloperPortalError.invalidCertificateRequest(cause: message)
                 case DeveloperPortalResultCodes.maximumCertificatesReachedAlternate, DeveloperPortalResultCodes.maximumCertificatesReached:
-                    debugLog("[SideSign] addCertificate: maximum certificates reached (\(code)): \(message)")
                     return DeveloperPortalError.tooManyCertificates(cause: message)
                 default: return nil
                 }
@@ -119,14 +109,12 @@ public extension DeveloperPortal {
         }
 
         debugLog("[SideSign] addCertificate succeeded")
-        verboseLog("[SideSign] SerialNumber: \(cert.serialNumber)")
         return KeyStore(certificate: cert, privateKey: certRequest.privateKey)
     }
 
     func revokeCertificate(_ certificate: X509Certificate, for team: Team, session: Session) async throws -> Bool {
         let certIdentifier = certificate.identifier ?? certificate.serialNumber
         debugLog("[SideSign] revokeCertificate starting...")
-        verboseLog("[SideSign] Name: '\(certificate.name)', ID: '\(certIdentifier)', SN: \(certificate.serialNumber), Team: \(team.name)")
 
         let endpoint: X509Certificate.CertificateEndpoint
         if let source = certificate.sourceEndpoint {
@@ -141,7 +129,6 @@ public extension DeveloperPortal {
 
         let _: EmptyResponse = try await sendServicesRequest(request, additionalParameters: nil, session: session, team: team)
         debugLog("[SideSign] revokeCertificate succeeded")
-        verboseLog("[SideSign] Revoked Certificate: \(certIdentifier)")
         return true
     }
 }

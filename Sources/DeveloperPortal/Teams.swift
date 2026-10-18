@@ -12,7 +12,6 @@ public extension DeveloperPortal {
 
     func fetchTeams(for account: Account, session: Session) async throws -> [Team] {
         debugLog("[SideSign] fetchTeams starting...")
-        verboseLog("[SideSign] Account: \(account.appleID)")
 
         let response: ListTeamsResponse = try await sendRequest(url: Constants.URLs.listTeams, session: session)
 
@@ -20,14 +19,6 @@ public extension DeveloperPortal {
             var mutable = team
             mutable.account = account
             return mutable
-        }
-
-        debugLog("[SideSign] fetchTeams completed with \(teams.count) team(s)")
-        if !teams.isEmpty {
-            let list = teams.enumerated().map { "  \($0.offset + 1). \($0.element.name) (\($0.element.identifier))" }.joined(separator: "\n")
-            verboseLog("[SideSign] Teams (\(teams.count)):\n\(list)")
-        } else {
-            verboseLog("[SideSign] Teams: []")
         }
 
         if teams.isEmpty {
