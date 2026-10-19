@@ -631,7 +631,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
         if let expectedSHA = oda.sha256, !expectedSHA.isEmpty {
             let zipSHA = computeSHA256(data: zipData)
             if zipSHA.caseInsensitiveCompare(expectedSHA) != .orderedSame {
-                debugLog("[AnisetteDataManager] SHA-256 mismatch. Proceeding with extraction.")
+                throw AnisetteError.sha256Mismatch(expected: expectedSHA, actual: zipSHA)
             }
         }
 

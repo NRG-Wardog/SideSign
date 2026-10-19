@@ -70,6 +70,16 @@ EXPECTED_PORTAL_CORE = '97bfa34476a7fb456c9f8ecef74744ecf87104d9d96742d7e0aa54dc
 EXPECTED_TEAMS_CORE = '429a22e864589c9b4bfafa7244407f5aa1a9e630b95c8a179a71f69ebda30d90'
 EXPECTED_MANAGER_CORE = 'cb49423d8ae3cfe2a5f6712eb491eef8159b8f5537416383f829527c8cfda38a'
 
+def reverse_reviewed_integrity_fix(source):
+    """Undo exactly the approved one-line throw for the historical trace proof."""
+    after = '                throw AnisetteError.sha256Mismatch(expected: expectedSHA, actual: zipSHA)\n'
+    before = '                debugLog("[AnisetteDataManager] SHA-256 mismatch. Proceeding with extraction.")\n'
+    if source.count(after) != 1:
+        raise ValueError('Expected exactly one reviewed integrity throw')
+    if before in source:
+        raise ValueError('Old proceed-on-mismatch log must remain absent')
+    return source.replace(after, before, 1)
+
 EXPECTED_PROVISIONING_CORE = {'Devices.swift': 'c3315d7abcfdef9e737a502251fbffdfe1a1b75e76b006712df9566164455299', 'Certificates.swift': 'bf0f27b22308c3e18214ae367e6d24dab1d5cc9a2f196cdbaff9e14ed75f8577'}
 
 class LoginTraceSourceTests(unittest.TestCase):
@@ -90,7 +100,7 @@ class LoginTraceSourceTests(unittest.TestCase):
                 self.assertEqual(hashlib.sha256(core.encode()).hexdigest(), expected)
 
     def test_portal_and_anisette_logic_is_preserved(self):
-        for name, content, expected in [('portal', self.portal, EXPECTED_PORTAL_CORE), ('anisette', self.manager, EXPECTED_MANAGER_CORE)]:
+        for name, content, expected in [('portal', self.portal, EXPECTED_PORTAL_CORE), ('anisette', reverse_reviewed_integrity_fix(self.manager), EXPECTED_MANAGER_CORE)]:
             with self.subTest(method=name):
                 core = normalized(remove_logs(content))
                 self.assertEqual(hashlib.sha256(core.encode()).hexdigest(), expected)
@@ -103,7 +113,8 @@ class LoginTraceSourceTests(unittest.TestCase):
 
     def test_anisette_logs_are_fixed_literals(self):
         calls = re.findall(r'^[ \t]*(?:debugLog|verboseLog)\((.*)\)$', self.manager, re.M)
-        self.assertEqual(len(calls), 9)
+        # The reviewed integrity throw replaces exactly one manager log.
+        self.assertEqual(len(calls), 8)
         for call in calls:
             self.assertRegex(call, r'^"[^"\\]*"$')
 

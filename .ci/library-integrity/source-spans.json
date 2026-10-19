@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "base_commit": "b28fb0b72937849d4428e9ae313209b606f859b4",
+  "base_tree": "6ecab37d6f7d73763f50cc1f09ff1f93bd4ab9ee",
+  "description": "Byte-bound inputs for genuine-source synthetic tests; compilation/runtime separately required.",
+  "source_files": {
+    "Sources/Anisette/AnisetteDataManager.swift": {
+      "sha256": "6159f83d125b3b9a898754179e0168c061d44510ccd1e84a174fe77c83f3e5e5",
+      "bytes": 30132
+    },
+    "Sources/Archiver/Archive.swift": {
+      "sha256": "e58c6d0dc9933db8ba85a4871ffe3b6c5c3c532d852813185f3620c8b8b4db59",
+      "bytes": 25859
+    },
+    "Sources/Archiver/FileManagerZip.swift": {
+      "sha256": "c95b998f11f5b906d860876d3be3a409bf079dffdfb80c9ccdfaefabc32ba22f",
+      "bytes": 7356
+    },
+    "Sources/SideSign.swift": {
+      "sha256": "9c161cb2c609fb4d1c9d6272f96453c97d427834510ccfd8d54e87e16b5782f9",
+      "bytes": 2080
+    }
+  },
+  "spans": {
+    "oda_info": {
+      "path": "Sources/Anisette/AnisetteDataManager.swift",
+      "offset": 415,
+      "bytes": 2132,
+      "sha256": "cca5fcee3f960e59d963e101b4f7496f7459ef19a68c0b8b207f60fccc2a63d7",
+      "first_line": 19,
+      "last_line": 76
+    },
+    "anisette_error": {
+      "path": "Sources/Anisette/AnisetteDataManager.swift",
+      "offset": 5717,
+      "bytes": 3158,
+      "sha256": "1274cdd4066bd1688dd840d8a798f82cd81bf9035c1f72e6d9975ca174d6c84e",
+      "first_line": 172,
+      "last_line": 234
+    },
+    "manager_state": {
+      "path": "Sources/Anisette/AnisetteDataManager.swift",
+      "offset": 9217,
+      "bytes": 87,
+      "sha256": "cdf7c0d2b6165fc4f3a78d7867cd6e6628a8533e60e75e2e000566c82ff6d5c0",
+      "first_line": 244,
+      "last_line": 245
+    },
+    "download": {
+      "path": "Sources/Anisette/AnisetteDataManager.swift",
+      "offset": 25032,
+      "bytes": 1972,
+      "sha256": "7bac312a247c0c4eb3b0be5696d3c44f39dac57ed6b59b2cf34aa26c829fd398",
+      "first_line": 612,
+      "last_line": 657
+    },
+    "resolve": {
+      "path": "Sources/Anisette/AnisetteDataManager.swift",
+      "offset": 27004,
+      "bytes": 1254,
+      "sha256": "7d3c7632bce14882134dc15280251adbf5a18c5bb1534ec1a5887f83cca49608",
+      "first_line": 658,
+      "last_line": 679
+    },
+    "sha256": {
+      "path": "Sources/Anisette/AnisetteDataManager.swift",
+      "offset": 29958,
+      "bytes": 172,
+      "sha256": "20687281f8e344ce10c50f289b48fa2f3db8b4d9d883b221ccb03843994d5cd2",
+      "first_line": 714,
+      "last_line": 717
+    },
+    "unzip": {
+      "path": "Sources/Archiver/FileManagerZip.swift",
+      "offset": 158,
+      "bytes": 2632,
+      "sha256": "67f9cd6b37267eb048209c498b872dc45e37f5af71f5825c4745e2f2d16ea57c",
+      "first_line": 11,
+      "last_line": 74
+    },
+    "http_response": {
+      "path": "Sources/SideSign.swift",
+      "offset": 880,
+      "bytes": 1072,
+      "sha256": "233ca992208b7308a1787040344c8df78660671c8d705c185d6117f777adf117",
+      "first_line": 31,
+      "last_line": 59
+    }
+  }
+}
