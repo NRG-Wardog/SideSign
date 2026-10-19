@@ -1,12 +1,12 @@
 {
-  "originHash" : "9bae0776c9d3744775f7f251a21e1ccc20c03b1b00199f575516d39da810164e",
+  "originHash" : "258f5ae3aac78c32662211c8f6f594f0740d378c522802b4a7ca33cccee168f5",
   "pins" : [
     {
       "identity" : "anisettekit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/NRG-Wardog/AnisetteKit.git",
       "state" : {
-        "revision" : "161435bcc0344e1a9853669455c1ca8d9dda2bf1"
+        "revision" : "e6e9d4aac698de2a5219aaef02c9a417da45f4e9"
       }
     },
     {
