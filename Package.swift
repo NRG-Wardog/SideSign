@@ -35,7 +35,7 @@ let package = Package(
         .package(url: "https://github.com/mahee96/CodeSignKit.git",   branch: "main"),
         .package(url: "https://github.com/mahee96/GSACryptoKit.git",  branch: "main"),
         .package(url: "https://github.com/SideStore/libdeflate",      branch: "master"),
-        .package(url: "https://github.com/NRG-Wardog/AnisetteKit.git", revision: "e6e9d4aac698de2a5219aaef02c9a417da45f4e9"),
+        .package(url: "https://github.com/NRG-Wardog/AnisetteKit.git", revision: "b76bd9c00c1926de38c2269849a4bf647e3b84d1"),
 
 //        .package(name: "CodeSignKit",  path: "../../local/CodeSignKit"),
 //        .package(name: "GSACryptoKit", path: "../../local/GSACryptoKit"),
