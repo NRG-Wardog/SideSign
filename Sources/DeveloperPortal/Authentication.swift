@@ -28,8 +28,10 @@ public extension DeveloperPortal {
         var activeSpan = trace?.begin(.authSRPInit)
         do {
             let sanitizedAppleID = unsanitizedAppleID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let windowsContext = WindowsAnisetteAuthentication.current
+            var anisetteData = anisetteData
 
-            let clientDictionary: [String: any Sendable] = [
+            var clientDictionary: [String: any Sendable] = [
                 "bootstrap": true,
                 "icscrec": true,
                 "pbe": false,
@@ -46,6 +48,9 @@ public extension DeveloperPortal {
                 "X-Apple-I-Client-Time": anisetteData.clientTime,
                 "X-Apple-I-TimeZone": anisetteData.timeZone
             ]
+            if windowsContext != nil {
+                clientDictionary = makeWindowsClientDictionary(anisetteData: anisetteData)
+            }
 
             guard let srpClient = SRPClient(),
                   let publicKey = srpClient.startAuthentication()
@@ -54,7 +59,7 @@ public extension DeveloperPortal {
             }
 
             // 1. Send authentication 'init' request
-            let initParameters: [String: any Sendable] = [
+            var initParameters: [String: any Sendable] = [
                 "A2k": publicKey,
                 "cpd": clientDictionary,
                 "ps": ["s2k", "s2k_fo"],
@@ -62,7 +67,24 @@ public extension DeveloperPortal {
                 "u": sanitizedAppleID
             ]
 
-            let initResponse = try await sendAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)
+            var initResponse = try await sendAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)
+            if let windowsContext,
+               let status = initResponse["Status"] as? [String: any Sendable],
+               status["hsc"] as? Int == 434 {
+                let sim = (status["X-Apple-I-MD-DATA"] as? String)
+                    ?? (status["X-Apple-I-MD-DATA"] as? Data)?.base64EncodedString()
+                guard let sim, !sim.isEmpty else { throw WindowsAnisetteError.resyncUnavailable }
+                // The operation context limits resync across recursive 2FA as well.
+                // Reuse this SRP client and A2k; only the anisette CPD changes.
+                anisetteData = try await windowsContext.resynchronize(sim: sim)
+                clientDictionary = makeWindowsClientDictionary(anisetteData: anisetteData)
+                initParameters["cpd"] = clientDictionary
+                initResponse = try await sendAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)
+                if let repeatedStatus = initResponse["Status"] as? [String: any Sendable],
+                   repeatedStatus["hsc"] as? Int == 434 {
+                    throw WindowsAnisetteError.resyncUnavailable
+                }
+            }
 
             guard let c = initResponse["c"] as? String,
                   let salt = initResponse["s"] as? Data,
@@ -169,9 +191,14 @@ public extension DeveloperPortal {
 
             // 2FA auth type
             let statusDictionary = completeResponseDictionary["Status"] as? [String: any Sendable]
-            let authType = (statusDictionary?["au"] as? String)
+            var authType = (statusDictionary?["au"] as? String)
                ?? (completeResponseDictionary["au"] as? String)
                ?? ((statusDictionary?["hsc"] as? Int) == 409 ? "pushedCode" : nil)
+            if windowsContext != nil,
+               ((statusDictionary?["au"] as? String) ?? "").isEmpty,
+               statusDictionary?["hsc"] as? Int == 409 {
+                authType = "pushedCode"
+            }
 
             let twoFactorAuthContext = TwoFactorAuthContext(
                 dsid: dsid, 
@@ -249,7 +276,7 @@ public extension DeveloperPortal {
                 throw ServerError.missingKey(key: "c", jsonPayload: prettyJSONString(from: decryptedDictionary))
             }
 
-            let app = customHeaders.grandSlam.authApp
+            let app = windowsContext != nil ? "com.apple.gs.xcode.auth" : customHeaders.grandSlam.authApp
             guard let checksum = CryptoUtilities.hmacSHA256(key: sessionKey, strings: ["apptokens", dsid, app]) else {
                 throw DeveloperPortalError.authenticationHandshakeFailed(cause: "Failed to compute apptokens checksum")
             }
@@ -287,12 +314,31 @@ public extension DeveloperPortal {
         }
     }
 
+    // AltSign PR #61's exact nine-field CPD is used only by the opt-in path.
+    private func makeWindowsClientDictionary(anisetteData: AnisetteData) -> [String: any Sendable] {
+        [
+            "bootstrap": "true",
+            "icscrec": "true",
+            "pbe": "false",
+            "prkgen": "true",
+            "svct": "iCloud",
+            "loc": "en_US",
+            "X-Apple-I-MD": anisetteData.oneTimePassword,
+            "X-Apple-I-MD-M": anisetteData.machineID,
+            "X-Mme-Device-Id": anisetteData.deviceID
+        ]
+    }
+
+    private var authenticationURLSession: URLSession {
+        WindowsAnisetteAuthentication.current?.session ?? session
+    }
+
     func sendAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData) async throws -> [String: any Sendable] {
         let requestURL = Constants.URLs.grandSlamAuth
         let h = customHeaders
 
         let parameters: [String: any Sendable] = [
-            "Header": ["Version": h.grandSlam.headerVersion],
+            "Header": ["Version": WindowsAnisetteAuthentication.current != nil ? "1.0.1" : h.grandSlam.headerVersion],
             "Request": requestParameters
         ]
 
@@ -310,22 +356,38 @@ public extension DeveloperPortal {
             "Connection": "close"
         ]
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if WindowsAnisetteAuthentication.current != nil {
+            request.setValue("text/x-xml-plist", forHTTPHeaderField: "Accept")
+            request.setValue("27.0 (27A5218g)", forHTTPHeaderField: "X-Xcode-Version")
+            request.setValue("com.apple.gs.xcode.auth", forHTTPHeaderField: "X-Apple-App-Info")
+            request.setValue(anisetteData.userAgent, forHTTPHeaderField: "User-Agent")
+        }
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await authenticationURLSession.data(for: request)
         } catch {
             throw error
         }
 
         let httpResponse = response as? HTTPURLResponse
         let statusCode = httpResponse?.statusCode ?? 0
+        if WindowsAnisetteAuthentication.current != nil, !(200..<300).contains(statusCode) {
+            // Do not attempt to parse (or expose) an HTML rejection body as plist.
+            throw WindowsAnisetteError.httpStatus(statusCode)
+        }
 
         guard !data.isEmpty else {
             throw ServerError.badServerResponse(reason: "Auth endpoint returned empty response (0 bytes)", jsonPayload: "0 bytes")
         }
 
-        guard let responseDictionary = parsePlistOrJSON(data) else {
+        let parsedResponse: [String: any Sendable]?
+        if WindowsAnisetteAuthentication.current != nil {
+            parsedResponse = parseWindowsAuthenticationResponse(data)
+        } else {
+            parsedResponse = parsePlistOrJSON(data)
+        }
+        guard let responseDictionary = parsedResponse else {
             let context = AuthenticationResponseContext(data: data, httpStatus: statusCode, mimeType: response.mimeType)
             throw ServerError.invalidResponseFormat(rawPayload: "[redacted]", responseContext: context)
         }
@@ -336,6 +398,13 @@ public extension DeveloperPortal {
             throw ServerError.missingKey(key: "Status", jsonPayload: rawStr)
         }
 
+        if WindowsAnisetteAuthentication.current != nil, status["hsc"] as? Int == 434 {
+            // Only init may resynchronize, never complete/apptokens or -80045.
+            guard requestParameters["o"] as? String == "init" else {
+                throw WindowsAnisetteError.resyncUnavailable
+            }
+            return dictionary
+        }
         let errorCode = status["ec"] as? Int ?? 0
         if errorCode != 0 {
             let errorDesc = status["em"] as? String
@@ -353,6 +422,13 @@ public extension DeveloperPortal {
         }
 
         return dictionary
+    }
+
+    private func parseWindowsAuthenticationResponse(_ data: Data) -> [String: any Sendable]? {
+        guard let envelope = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: any Sendable],
+              let response = envelope["Response"] as? [String: any Sendable],
+              response["Status"] is [String: any Sendable] else { return nil }
+        return envelope
     }
 
     private struct FetchedAuthToken {
@@ -643,7 +719,7 @@ public extension DeveloperPortal {
             var request = makeTwoFactorAuthRequest(url: Constants.URLs.trustedDevice, context: context)
             request.httpMethod = "GET"
 
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await authenticationURLSession.data(for: request)
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.safeStatusCode ?? 0
             try throwIfXMLUIErrorAlert(in: data, statusCode: statusCode, actionName: "sendTrustedDevice2FACodeRequest")
@@ -684,7 +760,7 @@ public extension DeveloperPortal {
                 "serverInfo": serverInfo
             ], format: .xml, options: 0)
 
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await authenticationURLSession.data(for: request)
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.safeStatusCode ?? 0
 
@@ -769,7 +845,7 @@ public extension DeveloperPortal {
             var verifyRequest = makeTwoFactorAuthRequest(url: Constants.URLs.grandSlamValidate, context: context)
             verifyRequest.setValue(code, forHTTPHeaderField: "security-code")
 
-            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)
+            let (verifyData, verifyResponse) = try await authenticationURLSession.data(for: verifyRequest)
             let verifyHttpResponse = verifyResponse as? HTTPURLResponse
             let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0
 
@@ -796,7 +872,7 @@ public extension DeveloperPortal {
                 "serverInfo": ["mode": mode, "phoneNumber.id": phoneID]
             ], format: .xml, options: 0)
 
-            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)
+            let (verifyData, verifyResponse) = try await authenticationURLSession.data(for: verifyRequest)
             let verifyHttpResponse = verifyResponse as? HTTPURLResponse
             let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0
 
@@ -920,6 +996,14 @@ public extension DeveloperPortal {
             "Connection": "close"
         ]
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if WindowsAnisetteAuthentication.current != nil {
+            request.setValue("text/x-xml-plist", forHTTPHeaderField: "Accept")
+            request.setValue("text/x-xml-plist", forHTTPHeaderField: "Content-Type")
+            request.setValue("27.0 (27A5218g)", forHTTPHeaderField: "X-Xcode-Version")
+            request.setValue("com.apple.gs.xcode.auth", forHTTPHeaderField: "X-Apple-App-Info")
+            request.setValue(a.userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue(nil, forHTTPHeaderField: "X-Apple-I-SRL-NO")
+        }
         return request
     }
 
