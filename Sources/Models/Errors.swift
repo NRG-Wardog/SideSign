@@ -70,16 +70,49 @@ public enum DeveloperPortalError: Error, LocalizedError, Sendable {
     }
 }
 
+// Finite outer-auth response metadata. Never retains response bytes, headers,
+// URLs, identifiers, tokens, or hashes of authentication data.
+public struct AuthenticationResponseContext: Sendable {
+    public enum Shape: String, Sendable {
+        case plistDictionary, plistArray, plistScalar
+        case jsonDictionary, jsonArray, jsonScalar
+        case unrecognized
+    }
+    public enum MIME: String, Sendable { case html, xmlOrPlist, json, other, unavailable }
+    public let httpStatus: Int?
+    public let shape: Shape
+    public let mime: MIME
+
+    public init(data: Data, httpStatus: Int, mimeType: String? = nil) {
+        switch mimeType?.lowercased() {
+        case nil: self.mime = .unavailable
+        case "text/html", "application/xhtml+xml": self.mime = .html
+        case "text/xml", "application/xml", "text/x-xml-plist", "application/x-plist", "application/plist": self.mime = .xmlOrPlist
+        case "application/json", "text/json": self.mime = .json
+        default: self.mime = .other
+        }
+        self.httpStatus = (100...599).contains(httpStatus) ? httpStatus : nil
+        // Classification only. JSON fragments are not newly accepted by auth.
+        if let object = try? PropertyListSerialization.propertyList(from: data, format: nil) {
+            self.shape = object is [String: Any] ? .plistDictionary :
+                (object is [Any] ? .plistArray : .plistScalar)
+        } else if let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) {
+            self.shape = object is [String: Any] ? .jsonDictionary :
+                (object is [Any] ? .jsonArray : .jsonScalar)
+        } else { self.shape = .unrecognized }
+    }
+}
+
 public enum ServerError: LocalizedError, CustomStringConvertible, Sendable {
     case badServerResponse(reason: String, jsonPayload: String)
-    case invalidResponseFormat(rawPayload: String)
+    case invalidResponseFormat(rawPayload: String, responseContext: AuthenticationResponseContext? = nil)
     case missingKey(key: String, jsonPayload: String)
     case underlyingError(code: Int, message: String)
 
     public var description: String {
         switch self {
         case .badServerResponse(let reason, let jsonPayload): return "badServerResponse(reason: \"\(reason)\"):\n\(jsonPayload)"
-        case .invalidResponseFormat(let rawPayload):          return "invalidResponseFormat:\n\(rawPayload)"
+        case .invalidResponseFormat(let rawPayload, _):          return "invalidResponseFormat:\n\(rawPayload)"
         case .missingKey(let key, let jsonPayload):           return "missingKey(\"\(key)\"):\n\(jsonPayload)"
         case .underlyingError(let code, let message):         return "underlyingError(code: \(code), message: \"\(message)\")"
         }
@@ -88,7 +121,7 @@ public enum ServerError: LocalizedError, CustomStringConvertible, Sendable {
     public var errorDescription: String? {
         switch self {
         case .badServerResponse(let reason, let jsonPayload): return "Invalid server response: \(reason)\n\(jsonPayload)"
-        case .invalidResponseFormat(let rawPayload):          return "Invalid server response: unparseable format\n\(rawPayload)"
+        case .invalidResponseFormat(let rawPayload, _):          return "Invalid server response: unparseable format\n\(rawPayload)"
         case .missingKey(let key, let jsonPayload):           return "Invalid server response: missing required key '\(key)'\n\(jsonPayload)"
         case .underlyingError(let code, let message):         return "\(message) (\(code))"
         }

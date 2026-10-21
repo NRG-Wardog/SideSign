@@ -315,8 +315,8 @@ public extension DeveloperPortal {
         }
 
         guard let responseDictionary = parsePlistOrJSON(data) else {
-            let rawStr = String(data: data, encoding: .utf8) ?? data.hexEncodedString()
-            throw ServerError.invalidResponseFormat(rawPayload: rawStr)
+            let context = AuthenticationResponseContext(data: data, httpStatus: statusCode, mimeType: response.mimeType)
+            throw ServerError.invalidResponseFormat(rawPayload: "[redacted]", responseContext: context)
         }
 
         let dictionary = (responseDictionary["Response"] as? [String: any Sendable]) ?? responseDictionary
