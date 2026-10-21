@@ -33,7 +33,7 @@ public extension X509Certificate {
         case sourceEndpoint
     }
 
-    public enum CertificateEndpoint: String, Sendable, Codable, CaseIterable {
+    enum CertificateEndpoint: String, Sendable, Codable, CaseIterable {
         case developerServices2
         case developerPortal
 

@@ -305,7 +305,7 @@ public enum CommandHandler {
                 return
             }
 
-            let executableName = app.bundle.infoDictionary?["CFBundleExecutable"] as? String ?? app.name
+            let executableName = app.executableName ?? app.name
 
             print("========================================")
             print("App Bundle Information")

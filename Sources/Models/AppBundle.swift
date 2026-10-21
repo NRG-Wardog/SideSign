@@ -22,6 +22,7 @@ public struct AppBundle: Sendable, Identifiable, Hashable, Equatable {
     public let bundle: Bundle
     public let iconName: String?
     public let provisioningProfile: ProvisioningProfile?
+    public let infoPlist: [String: any Sendable]
 
     public var hasPrivateEntitlements: Bool = false
 
@@ -33,8 +34,24 @@ public struct AppBundle: Sendable, Identifiable, Hashable, Equatable {
         loadExtensions()
     }
 
+    public var isExtension: Bool {
+        fileURL.pathExtension.lowercased() == "appex"
+    }
+
     public var entitlements: [String: any Sendable] {
         loadEntitlements()
+    }
+
+    public var infoPlistURL: URL {
+        InfoPlistParser.resolveInfoPlistURL(for: fileURL)
+    }
+
+    public var executableURL: URL? {
+        bundle.executableURL
+    }
+
+    public var executableName: String? {
+        bundle.executableURL?.lastPathComponent
     }
 
     public var entitlementsString: String {
@@ -59,71 +76,21 @@ public struct AppBundle: Sendable, Identifiable, Hashable, Equatable {
             return nil
         }
 
-        let infoURL = bundle.bundleURL.appendingPathComponent("Info.plist")
-        guard let data = try? Data(contentsOf: infoURL),
-              let info = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: any Sendable]
+        guard let parser = try? InfoPlistParser(bundleURL: fileURL),
+              let bundleIdentifier = parser.bundleIdentifier
         else {
             return nil
         }
 
-        guard let bundleIdentifier = (info["CFBundleIdentifier"] as? String) ?? (info["bundle-identifier"] as? String) else {
-            return nil
-        }
-
-        let name = (info["CFBundleDisplayName"] as? String)
-            ?? (info["CFBundleName"] as? String)
+        let name = parser.displayName
+            ?? parser.bundleName
             ?? fileURL.deletingPathExtension().lastPathComponent
 
-        let version = (info["CFBundleShortVersionString"] as? String) ?? "1.0"
-        let buildVersion = (info["CFBundleVersion"] as? String) ?? "1"
-
-        let minimumVersionString = (info["MinimumOSVersion"] as? String) ?? "1.0"
-        let components = minimumVersionString.split(separator: ".")
-        let minimumVersion = OperatingSystemVersion(
-            majorVersion: Int(components.first ?? "1") ?? 1,
-            minorVersion: components.count > 1 ? (Int(components[1]) ?? 0) : 0,
-            patchVersion: components.count > 2 ? (Int(components[2]) ?? 0) : 0
-        )
-
-        func deviceType(from value: Int) -> DeviceType {
-            switch value {
-            case UIDeviceFamilyCodes.iPhone:     return .iPhone
-            case UIDeviceFamilyCodes.iPad:       return .iPad
-            case UIDeviceFamilyCodes.appleTV:    return .appleTV
-            case UIDeviceFamilyCodes.appleWatch: return .appleWatch
-            case UIDeviceFamilyCodes.mac:        return .mac
-            case UIDeviceFamilyCodes.visionPro:  return .visionPro
-            default:                             return .iPhone
-            }
-        }
-
-        var supportedTypes: DeviceType = []
-        if let number = info["UIDeviceFamily"] as? NSNumber {
-            supportedTypes = deviceType(from: number.intValue)
-        } else if let array = info["UIDeviceFamily"] as? [NSNumber] {
-            for value in array {
-                supportedTypes.insert(deviceType(from: value.intValue))
-            }
-        } else {
-            supportedTypes = .iPhone
-        }
-
-        var resolvedIcon: String?
-        if let icons = info["CFBundleIcons"] as? [String: any Sendable],
-           let primary = icons["CFBundlePrimaryIcon"] {
-            if let iconStr = primary as? String {
-                resolvedIcon = iconStr
-            } else if let dict = primary as? [String: any Sendable] {
-                let files = dict["CFBundleIconFiles"] ?? info["CFBundleIconFiles"]
-                if let files = files as? [String] {
-                    resolvedIcon = files.last
-                }
-            }
-        }
-
-        if resolvedIcon == nil {
-            resolvedIcon = info["CFBundleIconFile"] as? String
-        }
+        let version = parser.shortVersionString ?? "1.0"
+        let buildVersion = parser.buildVersion ?? "1"
+        let minimumVersion = parser.operatingSystemVersion
+        let supportedTypes = parser.supportedDeviceTypes
+        let resolvedIcon = parser.primaryIconName
 
         let profileURL = fileURL.appendingPathComponent("embedded.mobileprovision")
         self.provisioningProfile = try? ProvisioningProfile(fileURL: profileURL)
@@ -137,6 +104,7 @@ public struct AppBundle: Sendable, Identifiable, Hashable, Equatable {
         self.minimumiOSVersion = minimumVersion
         self.supportedDeviceTypes = supportedTypes
         self.iconName = resolvedIcon
+        self.infoPlist = parser.rawDictionary
     }
 
     public static func == (lhs: AppBundle, rhs: AppBundle) -> Bool {
@@ -181,7 +149,9 @@ public struct AppBundle: Sendable, Identifiable, Hashable, Equatable {
 public extension AppBundle {
 
     func dumpMachOInfo() -> String {
-        let executableURL = bundle.executableURL ?? fileURL.appendingPathComponent(fileURL.deletingPathExtension().lastPathComponent)
+        guard let executableURL = self.executableURL else {
+            return "[SideSign] Executable binary not found for \(fileURL.lastPathComponent)"
+        }
         guard let parser = try? MachOParser(url: executableURL) else {
             return "[SideSign] MachOParser failed to load \(executableURL.lastPathComponent)"
         }
@@ -227,5 +197,42 @@ public extension AppBundle {
 
         info += "----------------------------------------"
         return info
+    }
+
+    func writeInfoPlist(_ plist: [String: any Sendable]) throws {
+        try InfoPlistParser(dictionary: plist).write(to: infoPlistURL)
+    }
+
+    func updateInfoPlist(with plist: [String: any Sendable], deep: Bool = true) throws {
+        var parser = try InfoPlistParser(plistURL: infoPlistURL)
+        parser.merge(plist, deep: deep)
+        try parser.write(to: infoPlistURL)
+    }
+
+    var allEntitlements: [String: [String: any Sendable]] {
+        var map: [String: [String: any Sendable]] = [bundleIdentifier: entitlements]
+        for ext in appExtensions {
+            map[ext.bundleIdentifier] = ext.entitlements
+        }
+        return map
+    }
+
+    var allAppBundles: [AppBundle] {
+        [self] + Array(appExtensions).sorted { $0.bundleIdentifier.localizedCaseInsensitiveCompare($1.bundleIdentifier) == .orderedAscending }
+    }
+
+    func appExtension(withBundleIdentifier id: String) -> AppBundle? {
+        appExtensions.first { $0.bundleIdentifier == id }
+    }
+
+    func appBundle(withBundleIdentifier id: String) -> AppBundle? {
+        if bundleIdentifier == id {
+            return self
+        }
+        return appExtension(withBundleIdentifier: id)
+    }
+
+    func entitlements(for bundleIdentifier: String) -> [String: any Sendable]? {
+        allEntitlements[bundleIdentifier]
     }
 }
