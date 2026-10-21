@@ -253,7 +253,7 @@ final class VendorAPKDownload: NSObject, URLSessionDataDelegate, @unchecked Send
         self.configuration = configuration
     }
     func download() async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             lock.lock(); defer { lock.unlock() }
             guard !cancelled else { continuation.resume(throwing: CancellationError()); return }
             guard FileManager.default.createFile(atPath: destination.path, contents: nil,
