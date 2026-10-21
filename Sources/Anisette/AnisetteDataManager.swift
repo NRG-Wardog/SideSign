@@ -429,25 +429,76 @@ public final class AnisetteDataManager: @unchecked Sendable {
         identifier: UUID,
         existingAdiBlob: Data? = nil,
         headers: AnisetteRequestHeaders? = nil,
+        diagnosticClientInfoSource: AuthenticationHeaderSource = .caller,
         onError: (@Sendable (Error) async throws -> Bool)? = nil
     ) async throws -> (data: AnisetteData, newAdiBlob: Data?) {
         guard let resolvedMode = mode ?? self.activeMode else {
             throw AnisetteError.modeNotConfigured
         }
 
+        let providerObservation = AuthenticationProviderObservation(
+            mode: Self.diagnosticMode(resolvedMode),
+            requestedClientInfoSource: headers?.clientInfo == nil ? .defaultValue : diagnosticClientInfoSource,
+            requestedClientInfoFamily: .classify(headers?.clientInfo ?? Constants.Anisette.defaultClientInfo),
+            requestedBlobInput: existingAdiBlob?.isEmpty == false ? .present : .absent)
+        let diagnosticTrace = AuthenticationDiagnosticTrace.current
+        let providerObservationToken = diagnosticTrace?.beginProviderObservation(providerObservation)
+
         if case .remote(let serverURL) = resolvedMode {
             if let cache = remoteCache,
                cache.serverURL == serverURL,
-               cache.identifier == identifier,
-               Date().timeIntervalSince(cache.timestamp) < Constants.Anisette.remoteCacheDuration 
-            {
-                debugLog("[AnisetteDataManager] Reusing cached remote Anisette data.")
-                return (cache.data, cache.newAdiBlob)
+               cache.identifier == identifier {
+                // Preserve the one original age read and cache acceptance rule.
+                let age = Date().timeIntervalSince(cache.timestamp)
+                if age < Constants.Anisette.remoteCacheDuration {
+                    debugLog("[AnisetteDataManager] Reusing cached remote Anisette data.")
+                    var cachedData = cache.data
+                    cachedData.markDiagnosticCacheHit(age: age,
+                        requestedClientInfo: headers?.clientInfo ?? Constants.Anisette.defaultClientInfo)
+                    let cachedContext = cachedData.diagnosticHeaderProvenance.context
+                    if let providerObservationToken {
+                        diagnosticTrace?.setProviderObservation(providerObservation.observing(
+                            .cacheHit, adapter: cachedContext.adapter, library: cachedContext.librarySelection,
+                            validation: cachedContext.libraryValidation), token: providerObservationToken)
+                    }
+                    return (cachedData, cache.newAdiBlob)
+                }
             }
         }
 
         let clientInfo = headers?.clientInfo ?? Constants.Anisette.defaultClientInfo
         let client = try await getClient(for: resolvedMode, clientInfo: clientInfo)
+        let effectiveClientInfo = headers?.clientInfo ?? client.clientInfo
+        let selectedSource: AuthenticationHeaderSource = headers?.clientInfo == nil ? .provider : diagnosticClientInfoSource
+        let adapter = Self.diagnosticAdapter(for: client)
+        let selectedProvider: AuthenticationProviderMode
+        switch adapter {
+        case .remote: selectedProvider = .remote
+        case .unicorn, .native: selectedProvider = .localAndroidADI
+        case .unknown: selectedProvider = .unknown
+        }
+        let librarySelection: AuthenticationAnisetteContext.LibrarySelection
+        let libraryValidation: AuthenticationAnisetteContext.LibraryValidation
+        switch resolvedMode {
+        case .verifiedAppleMusic:
+            // Existing getClient returned after verified preparation. This is
+            // not evidence that the loader mapped those selected file bytes.
+            librarySelection = .appleMusic4961447Arm64
+            libraryValidation = .observedVerified
+        case .localODA, .remoteODA:
+            librarySelection = .customOrLocal
+            libraryValidation = .notObserved
+        case .remote:
+            librarySelection = .remote
+            libraryValidation = .notObserved
+        }
+        let readyObservation = providerObservation.observing(.clientReady, adapter: adapter,
+            library: librarySelection, validation: libraryValidation)
+        if let providerObservationToken {
+            diagnosticTrace?.setProviderObservation(readyObservation, token: providerObservationToken)
+        }
+        let generationBlobInput: AuthenticationAnisetteContext.BlobInput =
+            existingAdiBlob?.isEmpty == false ? .present : .absent
 
         do {
             let (rawHeaders, newBlob) = try await client.getAnisetteData(
@@ -456,7 +507,26 @@ public final class AnisetteDataManager: @unchecked Sendable {
                 headers: headers
             )
 
-            let anisetteData = try Self.validateAndCreateAnisetteData(from: rawHeaders)
+            var anisetteData = try Self.validateAndCreateAnisetteData(from: rawHeaders)
+            // AnisetteKit 3e670c2 preserves the explicit client-info override.
+            // Provenance becomes unknown if a future provider changes that
+            // value; returned data and request behavior remain unchanged.
+            anisetteData.recordDiagnosticHeaderProvenance(
+                source: anisetteData.clientInfo == effectiveClientInfo ? selectedSource : .unknown,
+                provider: selectedProvider,
+                context: AuthenticationAnisetteContext(cache: .generated,
+                    requestedClientInfoFamily: .classify(clientInfo),
+                    generationBlobInput: generationBlobInput,
+                    generationBlobOutput: newBlob == nil ? .notGenerated : .generated,
+                    adapter: adapter, librarySelection: librarySelection, libraryValidation: libraryValidation,
+                    clientInfoPreservation: anisetteData.clientInfo == effectiveClientInfo ? .matched : .different,
+                    historicalBlobAssociation: .notRecorded))
+
+            if let providerObservationToken {
+                diagnosticTrace?.setProviderObservation(providerObservation.observing(
+                    .dataReady, adapter: adapter, library: librarySelection, validation: libraryValidation),
+                    token: providerObservationToken)
+            }
 
             if case .remote(let serverURL) = resolvedMode {
                 remoteCache = RemoteAnisetteCacheEntry(
@@ -481,6 +551,24 @@ public final class AnisetteDataManager: @unchecked Sendable {
             }
             throw error
         }
+    }
+
+    private static func diagnosticMode(_ mode: AnisetteMode) -> AuthenticationProviderObservation.Mode {
+        switch mode {
+        case .remote: return .remote
+        case .verifiedAppleMusic: return .verifiedAppleMusic
+        case .localODA: return .localODA
+        case .remoteODA: return .remoteODA
+        }
+    }
+
+    private static func diagnosticAdapter(for client: AnisetteClient) -> AuthenticationAnisetteContext.Adapter {
+        if client.provider is RemoteAnisetteDataProvider { return .remote }
+        if client.provider is UnicornAnisetteDataProvider { return .unicorn }
+        #if os(macOS)
+        if client.provider is NativeAnisetteDataProvider { return .native }
+        #endif
+        return .unknown
     }
 
     private func getClient(for mode: AnisetteMode, clientInfo: String) async throws -> AnisetteClient {
@@ -538,6 +626,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
         identifier: UUID,
         existingAdiBlob: Data? = nil,
         headers: AnisetteRequestHeaders? = nil,
+        diagnosticClientInfoSource: AuthenticationHeaderSource = .caller,
         onError: (@Sendable (Error) async throws -> Bool)? = nil,
         onSuccess: (@Sendable (URL) -> Void)? = nil
     ) async throws -> (data: AnisetteData, newAdiBlob: Data?) {
@@ -561,6 +650,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
                     identifier: identifier,
                     existingAdiBlob: existingAdiBlob,
                     headers: headers,
+                    diagnosticClientInfoSource: diagnosticClientInfoSource,
                     onError: onError
                 )
                 debugLog("[Anisette Failover] Acquired Anisette data.")

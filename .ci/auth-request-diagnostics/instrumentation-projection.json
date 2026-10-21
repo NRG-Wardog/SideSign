@@ -1,0 +1,357 @@
+[
+  [
+    "        let trace = LoginDiagnosticTrace.current\n        var activeSpan",
+    "        let diagnostic = AuthenticationDiagnosticTrace.current\n        return try await AuthenticationDiagnosticTrace.$invocation.withValue(diagnostic?.beginAuthentication()) {\n        let trace = LoginDiagnosticTrace.current\n        var activeSpan",
+    1
+  ],
+  [
+    "            activeSpan?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n    func sendAuthenticationRequest",
+    "            diagnostic?.authenticationFailed()\n            activeSpan?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n        }\n    }\n\n    func sendAuthenticationRequest",
+    1
+  ],
+  [
+    "let initResponse = try await sendAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)",
+    "let (initResponse, initObservation) = try await sendObservedAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)",
+    1
+  ],
+  [
+    "let completeResponseDictionary = try await sendAuthenticationRequest(parameters: completeParameters, anisetteData: anisetteData)",
+    "let (completeResponseDictionary, completeObservation) = try await sendObservedAuthenticationRequest(parameters: completeParameters, anisetteData: anisetteData)",
+    1
+  ],
+  [
+    "let responseDictionary = try await sendAuthenticationRequest(parameters: parameters, anisetteData: anisetteData)",
+    "let (responseDictionary, observation) = try await sendObservedAuthenticationRequest(parameters: parameters, anisetteData: anisetteData)",
+    1
+  ],
+  [
+    "throw ServerError.badServerResponse(reason: \"Auth init response missing c/s/i/B parameters\", jsonPayload: payload)",
+    "initObservation?.consumer(.initFields, .failed)\n                throw ServerError.badServerResponse(reason: \"Auth init response missing c/s/i/B parameters\", jsonPayload: payload)",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"spd\", jsonPayload: payload)",
+    "completeObservation?.consumer(.completeSPD, .failed)\n                throw ServerError.missingKey(key: \"spd\", jsonPayload: payload)",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"M2\", jsonPayload: payload)",
+    "completeObservation?.consumer(.proofField, .failed)\n                throw ServerError.missingKey(key: \"M2\", jsonPayload: payload)",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Server verification proof (M2) mismatch\")",
+    "completeObservation?.consumer(.proof, .failed)\n                throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Server verification proof (M2) mismatch\")",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Missing session key\")",
+    "completeObservation?.consumer(.sharedSecret, .failed)\n                throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Missing session key\")",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Failed to AES-CBC decrypt SPD payload\")",
+    "completeObservation?.consumer(.spdDecrypt, .failed)\n                throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Failed to AES-CBC decrypt SPD payload\")",
+    1
+  ],
+  [
+    "throw ServerError.invalidResponseFormat(rawPayload: rawDecrypted)",
+    "completeObservation?.consumer(.spdParse, .failed)\n                throw ServerError.invalidResponseFormat(rawPayload: rawDecrypted)",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"adsid\", jsonPayload: jsonStr)",
+    "completeObservation?.consumer(.dsid, .failed)\n                throw ServerError.missingKey(key: \"adsid\", jsonPayload: jsonStr)",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"GsIdmsToken\", jsonPayload: jsonStr)",
+    "completeObservation?.consumer(.idms, .failed)\n                throw ServerError.missingKey(key: \"GsIdmsToken\", jsonPayload: jsonStr)",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"sk\", jsonPayload: prettyJSONString(from: decryptedDictionary))",
+    "completeObservation?.consumer(.sessionKey, .failed)\n                throw ServerError.missingKey(key: \"sk\", jsonPayload: prettyJSONString(from: decryptedDictionary))",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"c\", jsonPayload: prettyJSONString(from: decryptedDictionary))",
+    "completeObservation?.consumer(.sessionChallenge, .failed)\n                throw ServerError.missingKey(key: \"c\", jsonPayload: prettyJSONString(from: decryptedDictionary))",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Failed to compute apptokens checksum\")",
+    "completeObservation?.consumer(.checksum, .failed)\n                throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Failed to compute apptokens checksum\")",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"et\", jsonPayload: payload)",
+    "observation?.consumer(.tokenField, .failed)\n                throw ServerError.missingKey(key: \"et\", jsonPayload: payload)",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Encrypted token payload is too short (\\(encryptedToken.count) bytes)\")",
+    "observation?.consumer(.tokenLength, .failed)\n                throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Encrypted token payload is too short (\\(encryptedToken.count) bytes)\")",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Failed to AES-GCM decrypt auth token\")",
+    "observation?.consumer(.tokenDecrypt, .failed)\n                throw DeveloperPortalError.authenticationHandshakeFailed(cause: \"Failed to AES-GCM decrypt auth token\")",
+    1
+  ],
+  [
+    "throw ServerError.invalidResponseFormat(rawPayload: rawStr)",
+    "observation?.consumer(.tokenParse, .failed)\n                throw ServerError.invalidResponseFormat(rawPayload: rawStr)",
+    1
+  ],
+  [
+    "throw ServerError.missingKey(key: \"t/\\(app)/token\", jsonPayload: payload)",
+    "observation?.consumer(.tokenPath, .failed)\n                throw ServerError.missingKey(key: \"t/\\(app)/token\", jsonPayload: payload)",
+    1
+  ],
+  [
+    "            activeSpan = trace?.begin(.authSRPChallenge)",
+    "            initObservation?.consumer(.initFields, .passed)\n            activeSpan = trace?.begin(.authSRPChallenge)",
+    1
+  ],
+  [
+    "            // 2FA auth type",
+    "            completeObservation?.consumer(.idms, .passed)\n            // 2FA auth type",
+    1
+  ],
+  [
+    "        return FetchedAuthToken(token:",
+    "        observation?.consumer(.tokenPath, .passed)\n        return FetchedAuthToken(token:",
+    1
+  ],
+  [
+    "guard let srpClient = SRPClient()",
+    "diagnostic?.authentication(.srpInit)\n            guard let srpClient = SRPClient()",
+    1
+  ],
+  [
+    "guard let passwordData = password.data",
+    "diagnostic?.authentication(.hash)\n            guard let passwordData = password.data",
+    1
+  ],
+  [
+    "guard let derivedPasswordKey = CryptoUtilities.pbkdf2SHA256",
+    "diagnostic?.authentication(.pbkdf2)\n            guard let derivedPasswordKey = CryptoUtilities.pbkdf2SHA256",
+    1
+  ],
+  [
+    "guard let verificationMessage = srpClient.processChallenge",
+    "diagnostic?.authentication(.challenge)\n            guard let verificationMessage = srpClient.processChallenge",
+    1
+  ],
+  [
+    "guard srpClient.verifyServerProof",
+    "diagnostic?.authentication(.proof)\n            guard srpClient.verifyServerProof",
+    1
+  ],
+  [
+    "guard let sharedSecret = srpClient.sessionKey",
+    "diagnostic?.authentication(.sharedSecret)\n            guard let sharedSecret = srpClient.sessionKey",
+    1
+  ],
+  [
+    "guard let spdKey = CryptoUtilities.hmacSHA256",
+    "diagnostic?.authentication(.spdDecrypt)\n            guard let spdKey = CryptoUtilities.hmacSHA256",
+    1
+  ],
+  [
+    "guard let decryptedDictionary = parsePlistOrJSON",
+    "diagnostic?.authentication(.spdParse)\n            guard let decryptedDictionary = parsePlistOrJSON",
+    1
+  ],
+  [
+    "guard let sessionKey = decryptedDictionary[\"sk\"]",
+    "diagnostic?.authentication(.sessionKey)\n            guard let sessionKey = decryptedDictionary[\"sk\"]",
+    1
+  ],
+  [
+    "guard let c = decryptedDictionary[\"c\"]",
+    "diagnostic?.authentication(.sessionChallenge)\n            guard let c = decryptedDictionary[\"c\"]",
+    1
+  ],
+  [
+    "guard let checksum = CryptoUtilities.hmacSHA256",
+    "diagnostic?.authentication(.checksum)\n            guard let checksum = CryptoUtilities.hmacSHA256",
+    1
+  ],
+  [
+    "try await handle2FARequest(",
+    "diagnostic?.authentication(.twoFactor)\n            try await handle2FARequest(",
+    1
+  ],
+  [
+    "let decision = try await accountRepairHandler",
+    "diagnostic?.authentication(.accountRepair)\n            let decision = try await accountRepairHandler",
+    1
+  ],
+  [
+    "let account = try await fetchAccount(session: session)",
+    "diagnostic?.authentication(.accountLookup)\n            let account = try await fetchAccount(session: session)",
+    1
+  ],
+  [
+    "            return AuthSession(account: account, session: session)",
+    "            diagnostic?.authentication(.complete, .passed)\n            return AuthSession(account: account, session: session)",
+    1
+  ],
+  [
+    "    func sendAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData) async throws -> [String: any Sendable] {\n        let requestURL = Constants.URLs.grandSlamAuth\n        let h = customHeaders",
+    "    func sendAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData) async throws -> [String: any Sendable] {\n        let (dictionary, _) = try await sendObservedAuthenticationRequest(parameters: requestParameters, anisetteData: anisetteData)\n        return dictionary\n    }\n\n    private func sendObservedAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData) async throws -> ([String: any Sendable], AuthenticationDiagnosticTrace.Request?) {\n        let diagnostic = AuthenticationDiagnosticTrace.current\n        let requestURL = Constants.URLs.grandSlamAuth\n        let diagnosticHeaders = diagnosticCustomHeadersSnapshot()\n        let h = diagnosticHeaders.headers",
+    1
+  ],
+  [
+    "        let plistData = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)",
+    "        diagnostic?.authentication(.serialization)\n        var diagnosticSerialized = false\n        defer { if !diagnosticSerialized { diagnostic?.authentication(.serialization, .failed) } }\n        let plistData = try PropertyListSerialization.data(fromPropertyList: parameters, format: .xml, options: 0)\n        diagnosticSerialized = true",
+    1
+  ],
+  [
+    "        let (data, response): (Data, URLResponse)",
+    "        let observation = diagnostic?.beginRequest(request, phase: requestParameters[\"o\"] as? String ?? \"unknown\",\n            parameters: requestParameters, headerVersion: h.grandSlam.headerVersion,\n            provenance: AuthenticationHeaderProvenance(anisetteData: anisetteData, grandSlamHeaders: diagnosticHeaders).encoded)\n        let (data, response): (Data, URLResponse)",
+    1
+  ],
+  [
+    "        } catch {\n            throw error\n        }\n\n        let httpResponse",
+    "        } catch {\n            observation?.transport(error)\n            throw error\n        }\n        observation?.response(request: request, data: data, response: response)\n\n        let httpResponse",
+    1
+  ],
+  [
+    "        guard !data.isEmpty else {\n            throw",
+    "        guard !data.isEmpty else {\n            observation?.finish(.empty)\n            throw",
+    1
+  ],
+  [
+    "guard let responseDictionary = parsePlistOrJSON(data) else {",
+    "guard let responseDictionary = parsePlistOrJSON(data, observation: observation) else {\n            observation?.finish(.parse)",
+    1
+  ],
+  [
+    "        let dictionary = (responseDictionary[\"Response\"] as? [String: any Sendable]) ?? responseDictionary\n        guard let status",
+    "        let dictionary = (responseDictionary[\"Response\"] as? [String: any Sendable]) ?? responseDictionary\n        observation?.envelope(responseDictionary, nested: responseDictionary[\"Response\"] is [String: any Sendable])\n        guard let status",
+    1
+  ],
+  [
+    "            let rawStr = prettyJSONString(from: responseDictionary)\n            throw ServerError.missingKey(key: \"Status\", jsonPayload: rawStr)",
+    "            observation?.status(dictionary[\"Status\"], ec: nil, hsc: nil, effective: nil, source: \"status\")\n            observation?.finish(.status)\n            let rawStr = prettyJSONString(from: responseDictionary)\n            throw ServerError.missingKey(key: \"Status\", jsonPayload: rawStr)",
+    1
+  ],
+  [
+    "        let errorCode = status[\"ec\"] as? Int ?? 0\n        if errorCode",
+    "        let errorCode = status[\"ec\"] as? Int ?? 0\n        observation?.status(status, ec: status[\"ec\"], hsc: status[\"hsc\"], effective: errorCode, source: \"status\")\n        if errorCode",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.incorrectCredentials(cause: errorDesc)",
+    "observation?.finish(.rejected, reason: .credentials)\n                throw DeveloperPortalError.incorrectCredentials(cause: errorDesc)",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.appSpecificPasswordRequired(cause: errorDesc)",
+    "observation?.finish(.rejected, reason: .appPassword)\n                throw DeveloperPortalError.appSpecificPasswordRequired(cause: errorDesc)",
+    1
+  ],
+  [
+    "throw DeveloperPortalError.incorrectVerificationCode(cause: errorDesc)",
+    "observation?.finish(.rejected, reason: .verification)\n                throw DeveloperPortalError.incorrectVerificationCode(cause: errorDesc)",
+    1
+  ],
+  [
+    "throw ServerError.underlyingError(code: errorCode, message: errorDesc ?? \"Authentication failed\")",
+    "observation?.finish(.rejected, reason: .underlying)\n                throw ServerError.underlyingError(code: errorCode, message: errorDesc ?? \"Authentication failed\")",
+    1
+  ],
+  [
+    "        return dictionary\n    }\n\n    private struct FetchedAuthToken",
+    "        observation?.finish(.accepted)\n        return (dictionary, observation)\n    }\n\n    private struct FetchedAuthToken",
+    1
+  ],
+  [
+    "    private func parsePlistOrJSON(_ data: Data) -> [String: any Sendable]? {\n           (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: any Sendable]\n        ?? (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: any Sendable]\n    }",
+    "    private func parsePlistOrJSON(_ data: Data, observation: AuthenticationDiagnosticTrace.Request? = nil) -> [String: any Sendable]? {\n        let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)\n        if let dictionary = plist as? [String: any Sendable] {\n            observation?.parser(plist: plist, json: nil, selected: \"plist\")\n            return dictionary\n        }\n        let json = try? JSONSerialization.jsonObject(with: data, options: [])\n        let dictionary = json as? [String: any Sendable]\n        observation?.parser(plist: plist, json: json, selected: dictionary == nil ? \"failure\" : \"json\")\n        return dictionary\n    }",
+    1
+  ],
+  [
+    "    private func sendTrustedDevice2FACodeRequest(context: TwoFactorAuthContext) async throws {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorRequest)\n        do {\n            var request = makeTwoFactorAuthRequest(url: Constants.URLs.trustedDevice, context: context)\n            request.httpMethod = \"GET\"\n\n            let (data, response) = try await session.data(for: request)\n            let httpResponse = response as? HTTPURLResponse\n            let statusCode = httpResponse?.safeStatusCode ?? 0\n            try throwIfXMLUIErrorAlert(in: data, statusCode: statusCode, actionName: \"sendTrustedDevice2FACodeRequest\")\n\n            guard statusCode == HTTPStatusCodes.ok else {\n                let rawStr = prettyJSONString(from: data)\n                throw ServerError.badServerResponse(reason: \"Trusted device request failed (HTTP \\(statusCode))\", jsonPayload: rawStr)\n            }\n            span?.finish(.succeeded)\n        } catch {\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    "    private func sendTrustedDevice2FACodeRequest(context: TwoFactorAuthContext) async throws {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorRequest)\n        var observation: AuthenticationDiagnosticTrace.Request?\n        do {\n            var request = makeTwoFactorAuthRequest(url: Constants.URLs.trustedDevice, context: context)\n            request.httpMethod = \"GET\"\n\n            observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: \"trustedRequest\")\n            let (data, response) = try await session.data(for: request)\n            observation?.response(request: request, data: data, response: response)\n            let httpResponse = response as? HTTPURLResponse\n            let statusCode = httpResponse?.safeStatusCode ?? 0\n            try throwIfXMLUIErrorAlert(in: data, statusCode: statusCode, actionName: \"sendTrustedDevice2FACodeRequest\", observation: observation)\n\n            guard statusCode == HTTPStatusCodes.ok else {\n                observation?.consumer(.http, .failed)\n                observation?.finish(.rejected, reason: .http)\n                let rawStr = prettyJSONString(from: data)\n                throw ServerError.badServerResponse(reason: \"Trusted device request failed (HTTP \\(statusCode))\", jsonPayload: rawStr)\n            }\n            observation?.consumer(.http, .passed)\n            observation?.finish(.accepted)\n            span?.finish(.succeeded)\n        } catch {\n            observation?.transport(error)\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    1
+  ],
+  [
+    "    private func sendPhone2FACodeRequest(mode requestedMode: String,\n                                      phoneID requestedPhoneID: String? = nil,\n                                      knownPhoneNumbers: [TrustedPhoneNumber] = [],\n                                      context: TwoFactorAuthContext) async throws -> TwoFactorAuthPhoneCodeResponse\n    {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorRequest)\n        do {\n            let sanitizedPhoneID: String = {\n                if let id = requestedPhoneID?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {\n                    return id\n                }\n                return \"1\"\n            }()\n\n            let serverInfo: [String: any Sendable] = [\n                \"mode\": requestedMode,\n                \"phoneNumber.id\": sanitizedPhoneID\n            ]\n\n            var request = makeTwoFactorAuthRequest(url: Constants.URLs.phonePutURL(mode: requestedMode), context: context)\n            request.httpMethod = \"POST\"\n            request.httpBody = try PropertyListSerialization.data(fromPropertyList: [\n                \"serverInfo\": serverInfo\n            ], format: .xml, options: 0)\n\n            let (data, response) = try await session.data(for: request)\n            let httpResponse = response as? HTTPURLResponse\n            let statusCode = httpResponse?.safeStatusCode ?? 0\n\n            let rawStr = prettyJSONString(from: data)\n\n            try throwIfXMLUIErrorAlert(in: data, statusCode: statusCode, actionName: \"sendPhone2FACodeRequest\")\n\n            let responseDict = parsePlistOrJSON(data)\n            let errorCode = responseDict?[\"ec\"] as? Int ?? 0\n            let errorMsg = (responseDict?[\"em\"] as? String)\n                       ?? ((responseDict?[\"Status\"] as? [String: any Sendable])?[\"em\"] as? String)\n\n            if errorCode == GrandSlamAuthErrorCodes.tooManyAttempts \n                || errorCode == GrandSlamAuthErrorCodes.tooManyCodesRequested \n                || errorCode == GrandSlamAuthErrorCodes.rateLimited \n                || statusCode == HTTPStatusCodes.tooManyRequests\n            {\n                let msg = errorMsg ?? \"Verification codes cannot be sent to this phone number at this time. Please try again later.\"\n                throw DeveloperPortalError.tooManyAttempts(cause: msg)\n            } else if errorCode != 0 {\n                let msg = errorMsg ?? \"Failed to request verification code from Apple.\"\n                throw ServerError.underlyingError(code: errorCode, message: msg)\n            }\n\n            guard statusCode == HTTPStatusCodes.ok else {\n                let reason = errorMsg ?? HTTPStatusCodes.localizedDescription(for: statusCode)\n                throw ServerError.badServerResponse(reason: reason, jsonPayload: rawStr)\n            }\n\n            var parsedNumbers = parseTrustedPhoneNumbers(from: responseDict)\n            if parsedNumbers.isEmpty {\n                parsedNumbers = knownPhoneNumbers\n            }\n            let singlePhoneDict = responseDict?[\"phoneNumber\"] as? [String: any Sendable]\n            let phoneListFirst = (responseDict?[\"phoneNumbers\"] as? [[String: any Sendable]])?.first\n            let trustedPhoneListFirst = (responseDict?[\"trustedPhoneNumbers\"] as? [[String: any Sendable]])?.first\n            let phoneDict = singlePhoneDict ?? phoneListFirst ?? trustedPhoneListFirst\n\n            let (xmluiServerPhoneID, xmluiServerMode) = parseXMLUIServerInfo(from: data)\n\n            let rawPhoneID = (phoneDict?[\"id\"] as? CustomStringConvertible)?.description.trimmingCharacters(in: .whitespacesAndNewlines)\n            let resolvedPhoneID: String? = (rawPhoneID?.isEmpty == false) ? rawPhoneID : xmluiServerPhoneID\n            let resolvedRequestedID: String? = (requestedPhoneID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? requestedPhoneID : nil\n\n            let phoneID = resolvedPhoneID ?? resolvedRequestedID ?? parsedNumbers.first?.id ?? \"1\"\n            let activeMode = (phoneDict?[\"mode\"] as? String) ?? xmluiServerMode ?? requestedMode\n\n            let numberWithDialCode = phoneDict?[\"numberWithDialCode\"] as? String\n            let obfuscatedNumber = phoneDict?[\"obfuscatedNumber\"] as? String\n            let lastTwoDigits = (phoneDict?[\"lastTwoDigits\"] as? String).map { \"\u2022\u2022\\($0)\" }\n            let xmluiNumber = parseXMLUIObfuscatedNumber(from: data)\n            let matchedNumber = parsedNumbers.first(where: { $0.id == phoneID })?.number\n\n            let numberObfuscated = numberWithDialCode\n                                ?? obfuscatedNumber\n                                ?? lastTwoDigits\n                                ?? xmluiNumber\n                                ?? matchedNumber\n                                ?? \"\"\n            if let idx = parsedNumbers.firstIndex(where: { $0.id == phoneID }), !numberObfuscated.isEmpty {\n                parsedNumbers[idx] = TrustedPhoneNumber(id: phoneID, number: numberObfuscated)\n            } else if parsedNumbers.isEmpty && !numberObfuscated.isEmpty {\n                parsedNumbers = [TrustedPhoneNumber(id: phoneID, number: numberObfuscated)]\n            }\n\n            span?.finish(.succeeded)\n            return TwoFactorAuthPhoneCodeResponse(\n                phoneID: phoneID,\n                activeMode: activeMode,\n                phoneNumbers: parsedNumbers,\n                statusCode: statusCode\n            )\n        } catch {\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    "    private func sendPhone2FACodeRequest(mode requestedMode: String,\n                                      phoneID requestedPhoneID: String? = nil,\n                                      knownPhoneNumbers: [TrustedPhoneNumber] = [],\n                                      context: TwoFactorAuthContext) async throws -> TwoFactorAuthPhoneCodeResponse\n    {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorRequest)\n        var observation: AuthenticationDiagnosticTrace.Request?\n        do {\n            let sanitizedPhoneID: String = {\n                if let id = requestedPhoneID?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {\n                    return id\n                }\n                return \"1\"\n            }()\n\n            let serverInfo: [String: any Sendable] = [\n                \"mode\": requestedMode,\n                \"phoneNumber.id\": sanitizedPhoneID\n            ]\n\n            var request = makeTwoFactorAuthRequest(url: Constants.URLs.phonePutURL(mode: requestedMode), context: context)\n            request.httpMethod = \"POST\"\n            AuthenticationDiagnosticTrace.current?.authentication(.serialization)\n            var diagnosticSerialized = false\n            defer { if !diagnosticSerialized { AuthenticationDiagnosticTrace.current?.authentication(.serialization, .failed) } }\n            request.httpBody = try PropertyListSerialization.data(fromPropertyList: [\n                \"serverInfo\": serverInfo\n            ], format: .xml, options: 0)\n\n            diagnosticSerialized = true\n            observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: \"phoneRequest\")\n            let (data, response) = try await session.data(for: request)\n            observation?.response(request: request, data: data, response: response)\n            let httpResponse = response as? HTTPURLResponse\n            let statusCode = httpResponse?.safeStatusCode ?? 0\n\n            let rawStr = prettyJSONString(from: data)\n\n            try throwIfXMLUIErrorAlert(in: data, statusCode: statusCode, actionName: \"sendPhone2FACodeRequest\", observation: observation)\n\n            let responseDict = parsePlistOrJSON(data, observation: observation)\n            let errorCode = responseDict?[\"ec\"] as? Int ?? 0\n            observation?.status(responseDict?[\"Status\"], ec: responseDict?[\"ec\"], hsc: (responseDict?[\"Status\"] as? [String: any Sendable])?[\"hsc\"], effective: errorCode, source: \"top\")\n            let errorMsg = (responseDict?[\"em\"] as? String)\n                       ?? ((responseDict?[\"Status\"] as? [String: any Sendable])?[\"em\"] as? String)\n\n            if errorCode == GrandSlamAuthErrorCodes.tooManyAttempts \n                || errorCode == GrandSlamAuthErrorCodes.tooManyCodesRequested \n                || errorCode == GrandSlamAuthErrorCodes.rateLimited \n                || statusCode == HTTPStatusCodes.tooManyRequests\n            {\n                let msg = errorMsg ?? \"Verification codes cannot be sent to this phone number at this time. Please try again later.\"\n                observation?.finish(.rejected, reason: .rateLimit)\n                throw DeveloperPortalError.tooManyAttempts(cause: msg)\n            } else if errorCode != 0 {\n                let msg = errorMsg ?? \"Failed to request verification code from Apple.\"\n                observation?.finish(.rejected, reason: .underlying)\n                throw ServerError.underlyingError(code: errorCode, message: msg)\n            }\n\n            guard statusCode == HTTPStatusCodes.ok else {\n                observation?.consumer(.http, .failed)\n                observation?.finish(.rejected, reason: .http)\n                let reason = errorMsg ?? HTTPStatusCodes.localizedDescription(for: statusCode)\n                throw ServerError.badServerResponse(reason: reason, jsonPayload: rawStr)\n            }\n\n            var parsedNumbers = parseTrustedPhoneNumbers(from: responseDict)\n            if parsedNumbers.isEmpty {\n                parsedNumbers = knownPhoneNumbers\n            }\n            let singlePhoneDict = responseDict?[\"phoneNumber\"] as? [String: any Sendable]\n            let phoneListFirst = (responseDict?[\"phoneNumbers\"] as? [[String: any Sendable]])?.first\n            let trustedPhoneListFirst = (responseDict?[\"trustedPhoneNumbers\"] as? [[String: any Sendable]])?.first\n            let phoneDict = singlePhoneDict ?? phoneListFirst ?? trustedPhoneListFirst\n\n            let (xmluiServerPhoneID, xmluiServerMode) = parseXMLUIServerInfo(from: data)\n\n            let rawPhoneID = (phoneDict?[\"id\"] as? CustomStringConvertible)?.description.trimmingCharacters(in: .whitespacesAndNewlines)\n            let resolvedPhoneID: String? = (rawPhoneID?.isEmpty == false) ? rawPhoneID : xmluiServerPhoneID\n            let resolvedRequestedID: String? = (requestedPhoneID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? requestedPhoneID : nil\n\n            let phoneID = resolvedPhoneID ?? resolvedRequestedID ?? parsedNumbers.first?.id ?? \"1\"\n            let activeMode = (phoneDict?[\"mode\"] as? String) ?? xmluiServerMode ?? requestedMode\n\n            let numberWithDialCode = phoneDict?[\"numberWithDialCode\"] as? String\n            let obfuscatedNumber = phoneDict?[\"obfuscatedNumber\"] as? String\n            let lastTwoDigits = (phoneDict?[\"lastTwoDigits\"] as? String).map { \"\u2022\u2022\\($0)\" }\n            let xmluiNumber = parseXMLUIObfuscatedNumber(from: data)\n            let matchedNumber = parsedNumbers.first(where: { $0.id == phoneID })?.number\n\n            let numberObfuscated = numberWithDialCode\n                                ?? obfuscatedNumber\n                                ?? lastTwoDigits\n                                ?? xmluiNumber\n                                ?? matchedNumber\n                                ?? \"\"\n            if let idx = parsedNumbers.firstIndex(where: { $0.id == phoneID }), !numberObfuscated.isEmpty {\n                parsedNumbers[idx] = TrustedPhoneNumber(id: phoneID, number: numberObfuscated)\n            } else if parsedNumbers.isEmpty && !numberObfuscated.isEmpty {\n                parsedNumbers = [TrustedPhoneNumber(id: phoneID, number: numberObfuscated)]\n            }\n\n            observation?.consumer(.http, .passed)\n            observation?.finish(.accepted)\n            span?.finish(.succeeded)\n            return TwoFactorAuthPhoneCodeResponse(\n                phoneID: phoneID,\n                activeMode: activeMode,\n                phoneNumbers: parsedNumbers,\n                statusCode: statusCode\n            )\n        } catch {\n            observation?.transport(error)\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    1
+  ],
+  [
+    "    private func validateTrustedDevice2FACode(code: String, context: TwoFactorAuthContext) async throws -> TwoFactorAuthValidationResult {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorVerify)\n        do {\n            var verifyRequest = makeTwoFactorAuthRequest(url: Constants.URLs.grandSlamValidate, context: context)\n            verifyRequest.setValue(code, forHTTPHeaderField: \"security-code\")\n\n            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)\n            let verifyHttpResponse = verifyResponse as? HTTPURLResponse\n            let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0\n\n            let result = try parseTwoFactorAuthVerifyResponse(data: verifyData, statusCode: verifyStatusCode, requirePeToken: false, httpResponse: verifyHttpResponse)\n            finishTwoFactorVerificationSpan(span, result: result)\n            return result\n        } catch {\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    "    private func validateTrustedDevice2FACode(code: String, context: TwoFactorAuthContext) async throws -> TwoFactorAuthValidationResult {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorVerify)\n        var observation: AuthenticationDiagnosticTrace.Request?\n        do {\n            var verifyRequest = makeTwoFactorAuthRequest(url: Constants.URLs.grandSlamValidate, context: context)\n            verifyRequest.setValue(code, forHTTPHeaderField: \"security-code\")\n\n            observation = AuthenticationDiagnosticTrace.current?.beginRequest(verifyRequest, phase: \"trustedVerify\")\n            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)\n            observation?.response(request: verifyRequest, data: verifyData, response: verifyResponse)\n            let verifyHttpResponse = verifyResponse as? HTTPURLResponse\n            let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0\n\n            let result = try parseTwoFactorAuthVerifyResponse(data: verifyData, statusCode: verifyStatusCode, requirePeToken: false, httpResponse: verifyHttpResponse, observation: observation)\n            finishTwoFactorVerificationSpan(span, result: result)\n            return result\n        } catch {\n            observation?.transport(error)\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    1
+  ],
+  [
+    "    private func validatePhone2FACode(code: String,\n                                      phoneID: String,\n                                      mode: String,\n                                      context: TwoFactorAuthContext) async throws -> TwoFactorAuthValidationResult\n    {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorVerify)\n        do {\n            var verifyRequest = makeTwoFactorAuthRequest(url: Constants.URLs.phoneSecurityCode, context: context)\n            verifyRequest.httpMethod = \"POST\"\n            verifyRequest.httpBody = try PropertyListSerialization.data(fromPropertyList: [\n                \"securityCode.code\": code,\n                \"serverInfo\": [\"mode\": mode, \"phoneNumber.id\": phoneID]\n            ], format: .xml, options: 0)\n\n            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)\n            let verifyHttpResponse = verifyResponse as? HTTPURLResponse\n            let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0\n\n            let result = try parseTwoFactorAuthVerifyResponse(data: verifyData, statusCode: verifyStatusCode, requirePeToken: true, httpResponse: verifyHttpResponse)\n            finishTwoFactorVerificationSpan(span, result: result)\n            return result\n        } catch {\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    "    private func validatePhone2FACode(code: String,\n                                      phoneID: String,\n                                      mode: String,\n                                      context: TwoFactorAuthContext) async throws -> TwoFactorAuthValidationResult\n    {\n        let span = LoginDiagnosticTrace.current?.begin(.twoFactorVerify)\n        var observation: AuthenticationDiagnosticTrace.Request?\n        do {\n            var verifyRequest = makeTwoFactorAuthRequest(url: Constants.URLs.phoneSecurityCode, context: context)\n            verifyRequest.httpMethod = \"POST\"\n            AuthenticationDiagnosticTrace.current?.authentication(.serialization)\n            var diagnosticSerialized = false\n            defer { if !diagnosticSerialized { AuthenticationDiagnosticTrace.current?.authentication(.serialization, .failed) } }\n            verifyRequest.httpBody = try PropertyListSerialization.data(fromPropertyList: [\n                \"securityCode.code\": code,\n                \"serverInfo\": [\"mode\": mode, \"phoneNumber.id\": phoneID]\n            ], format: .xml, options: 0)\n\n            diagnosticSerialized = true\n            observation = AuthenticationDiagnosticTrace.current?.beginRequest(verifyRequest, phase: \"phoneVerify\")\n            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)\n            observation?.response(request: verifyRequest, data: verifyData, response: verifyResponse)\n            let verifyHttpResponse = verifyResponse as? HTTPURLResponse\n            let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0\n\n            let result = try parseTwoFactorAuthVerifyResponse(data: verifyData, statusCode: verifyStatusCode, requirePeToken: true, httpResponse: verifyHttpResponse, observation: observation)\n            finishTwoFactorVerificationSpan(span, result: result)\n            return result\n        } catch {\n            observation?.transport(error)\n            span?.finish(.failed, reason: loginDiagnosticFailureReason(for: error), error: error)\n            throw error\n        }\n    }\n\n",
+    1
+  ],
+  [
+    "actionName: String) throws {",
+    "actionName: String, observation: AuthenticationDiagnosticTrace.Request? = nil) throws {",
+    1
+  ],
+  [
+    "            throw DeveloperPortalError.invalid2FAResponse(cause: xmluiMessage ?? alertMsg)",
+    "            observation?.consumer(.xmlAlert, .failed)\n            observation?.finish(.rejected, reason: .xmlAlert)\n            throw DeveloperPortalError.invalid2FAResponse(cause: xmluiMessage ?? alertMsg)",
+    1
+  ],
+  [
+    "                                                  httpResponse: HTTPURLResponse?) throws -> TwoFactorAuthValidationResult",
+    "                                                  httpResponse: HTTPURLResponse?,\n                                                  observation: AuthenticationDiagnosticTrace.Request? = nil) throws -> TwoFactorAuthValidationResult",
+    1
+  ],
+  [
+    "        let verifyDictionary = parsePlistOrJSON(data)",
+    "        let verifyDictionary = parsePlistOrJSON(data, observation: observation)",
+    1
+  ],
+  [
+    "        let statusDict = verifyDictionary?[\"Status\"] as? [String: any Sendable]",
+    "        let statusDict = verifyDictionary?[\"Status\"] as? [String: any Sendable]\n        observation?.status(verifyDictionary?[\"Status\"], ec: verifyDictionary?[\"ec\"], hsc: statusDict?[\"hsc\"], effective: errorCode, source: \"top\")",
+    1
+  ],
+  [
+    "            throw DeveloperPortalError.tooManyAttempts(cause: msg)\n        } else if",
+    "            observation?.finish(.rejected, reason: .rateLimit)\n            throw DeveloperPortalError.tooManyAttempts(cause: msg)\n        } else if",
+    1
+  ],
+  [
+    "            return .retry(.incorrectCode)",
+    "            observation?.consumer(.verify, .retry)\n            observation?.finish(.rejected, reason: .incorrectCode)\n            return .retry(.incorrectCode)",
+    1
+  ],
+  [
+    "            throw ServerError.underlyingError(code: errorCode, message: msg)\n        }",
+    "            observation?.finish(.rejected, reason: .underlying)\n            throw ServerError.underlyingError(code: errorCode, message: msg)\n        }",
+    1
+  ],
+  [
+    "            throw DeveloperPortalError.invalid2FAResponse(cause: message)",
+    "            observation?.consumer(.xmlAlert, .failed)\n            observation?.finish(.rejected, reason: .xmlAlert)\n            throw DeveloperPortalError.invalid2FAResponse(cause: message)",
+    1
+  ],
+  [
+    "            return .retry(statusCode >= 500 || statusCode == 0 ? .serviceUnavailable : .unknown)",
+    "            observation?.consumer(.http, .retry)\n            observation?.finish(.rejected, reason: statusCode >= 500 || statusCode == 0 ? .serviceUnavailable : .unknown)\n            return .retry(statusCode >= 500 || statusCode == 0 ? .serviceUnavailable : .unknown)",
+    1
+  ],
+  [
+    "                return .retry(.unknown)",
+    "                observation?.consumer(.peToken, .retry)\n                observation?.finish(.rejected, reason: .peToken)\n                return .retry(.unknown)",
+    1
+  ],
+  [
+    "        return .success\n    }\n\n    private func makeTwoFactorAuthRequest",
+    "        observation?.consumer(.verify, .passed)\n        observation?.finish(.accepted)\n        return .success\n    }\n\n    private func makeTwoFactorAuthRequest",
+    1
+  ]
+]

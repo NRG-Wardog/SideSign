@@ -257,14 +257,29 @@ public extension DeveloperPortalAPI {
 
 public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
-    public static let shared = DeveloperPortal()
+    public static let shared = DeveloperPortal(diagnosticHeaderSource: .defaultValue)
 
     public var customHeaders: SideSignHeaders {
         get { headersLock.withLock { cachedCustomHeaders } }
-        set { headersLock.withLock { cachedCustomHeaders = newValue } }
+        set { setCustomHeaders(newValue, diagnosticSource: .caller) }
     }
     private let headersLock = NSLock()
     private nonisolated(unsafe) var cachedCustomHeaders: SideSignHeaders
+    private nonisolated(unsafe) var cachedHeaderSource: AuthenticationHeaderSource
+
+    public func setCustomHeaders(_ headers: SideSignHeaders,
+                                 diagnosticSource: AuthenticationHeaderSource) {
+        headersLock.withLock {
+            cachedCustomHeaders = headers
+            cachedHeaderSource = diagnosticSource
+        }
+    }
+
+    func diagnosticCustomHeadersSnapshot() -> DiagnosticCustomHeadersSnapshot {
+        headersLock.withLock {
+            DiagnosticCustomHeadersSnapshot(headers: cachedCustomHeaders, source: cachedHeaderSource)
+        }
+    }
 
     public let baseURL               = Constants.URLs.developerServicesBase
     public let servicesBaseURL       = Constants.URLs.developerServicesV1Base
@@ -272,9 +287,11 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
     let session: URLSession
 
-    public init(session: URLSession = .shared, customHeaders: SideSignHeaders = SideSignHeaders()) {
+    public init(session: URLSession = .shared, customHeaders: SideSignHeaders = SideSignHeaders(),
+                diagnosticHeaderSource: AuthenticationHeaderSource = .unknown) {
         self.session = session
         self.cachedCustomHeaders = customHeaders
+        self.cachedHeaderSource = diagnosticHeaderSource
     }
 
     func formatDate(_ date: Date) -> String {

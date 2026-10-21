@@ -1,0 +1,18 @@
+{
+  "SideSign": "9757970d656135f0b21dc00700507d099f170320",
+  "SideStore": "28dd1f873cad2e12e1c07cacb80ac9685560e02c",
+  "sources": {
+    "SideSign/Sources/Models/AnisetteData.swift": {
+      "embedded_file": "AnisetteData.swift.txt",
+      "sha256": "b4e4f904d19f4bce7d3f920551b9e4c5303ae98e292adfe5dd628189e589141c"
+    },
+    "SideSign/Sources/Anisette/AnisetteDataManager.swift": {
+      "embedded_file": "AnisetteDataManager.swift.txt",
+      "sha256": "db959d82cbce11f9653c38f674815d1d8e5018947aa9404333863cb4864cf3e3"
+    },
+    "SideStore/SideStore/Core/Anisette/AnisetteConfigManager.swift": {
+      "embedded_file": "AnisetteConfigManager.swift.txt",
+      "sha256": "b9afb5977de88ebc9ca5087baf79dc0b54d3bfaeaa0795a060a248c3a4816122"
+    }
+  }
+}
