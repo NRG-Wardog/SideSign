@@ -174,6 +174,10 @@ public enum AnisetteError: LocalizedError, Sendable {
     case invalidServerSourceURL
     case missingODAEntry
     case downloadFailed(String)
+    // Structured failure metadata only. HTTP acceptance and integrity checks are unchanged.
+    case serverListHTTPFailure(statusCode: Int)
+    case odaMetadataHTTPFailure(statusCode: Int)
+    case archiveHTTPFailure(statusCode: Int)
     case sha256Mismatch(expected: String, actual: String)
     case invalidBase64Payload
     case decompressionFailed(String)
@@ -200,6 +204,12 @@ public enum AnisetteError: LocalizedError, Sendable {
             return "No 'oda' configuration found in Anisette servers JSON."
         case .downloadFailed(let reason):
             return "Failed to download On-Device Anisette package: \(reason)"
+        case .serverListHTTPFailure(let status):
+            return "Failed to download On-Device Anisette package: Server list request failed with HTTP \(status)"
+        case .odaMetadataHTTPFailure(let status):
+            return "Failed to download On-Device Anisette package: ODA metadata request failed with HTTP \(status)"
+        case .archiveHTTPFailure(let status):
+            return "Failed to download On-Device Anisette package: Package download failed with HTTP \(status)"
         case .sha256Mismatch(let expected, let actual):
             return "SHA-256 checksum mismatch for On-Device Anisette package (expected \(expected), got \(actual))."
         case .invalidBase64Payload:
@@ -570,7 +580,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResp = response as? HTTPURLResponse, httpResp.isSuccess else {
             let status = (response as? HTTPURLResponse)?.safeStatusCode ?? -1
-            throw AnisetteError.downloadFailed("Server list request failed with HTTP \(status)")
+            throw AnisetteError.serverListHTTPFailure(statusCode: status)
         }
 
         let decoder = JSONDecoder()
@@ -604,7 +614,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
         let (odaData, odaResp) = try await URLSession.shared.data(for: odaReq)
         guard let httpOdaResp = odaResp as? HTTPURLResponse, httpOdaResp.isSuccess else {
             let status = (odaResp as? HTTPURLResponse)?.safeStatusCode ?? -1
-            throw AnisetteError.downloadFailed("ODA metadata request failed with HTTP \(status)")
+            throw AnisetteError.odaMetadataHTTPFailure(statusCode: status)
         }
         return try JSONDecoder().decode(ODAInfo.self, from: odaData)
     }
@@ -668,7 +678,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
         let (downloadedData, response) = try await URLSession.shared.data(for: request)
         guard let httpResp = response as? HTTPURLResponse, httpResp.isSuccess else {
             let status = (response as? HTTPURLResponse)?.safeStatusCode ?? -1
-            throw AnisetteError.downloadFailed("Package download failed with HTTP \(status)")
+            throw AnisetteError.archiveHTTPFailure(statusCode: status)
         }
         if let rawString = String(data: downloadedData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
            let decoded = Data(base64Encoded: rawString, options: .ignoreUnknownCharacters) {
