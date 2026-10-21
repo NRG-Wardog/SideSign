@@ -14,6 +14,7 @@ public enum AnisetteMode: Sendable, Equatable, Codable, Hashable {
     case remote(server: URL)
     case localODA(libsDir: URL, provisioningDir: URL? = nil)
     case remoteODA(sourceURL: URL, fallbackURL: URL? = nil)
+    case verifiedAppleMusic
 }
 
 public struct ODAInfo: Codable, Equatable, Sendable {
@@ -252,6 +253,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
     public var activeMode: AnisetteMode?
     public let baseAnisetteDirectory: URL
     private var localProvider: AnisetteClient?
+    private var resolvedVendorLibraryDirectory: URL?
     private var isCaching: Bool = false
 
     private struct RemoteAnisetteCacheEntry {
@@ -311,6 +313,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
     }
 
     public var libsDir: URL {
+        if let resolvedVendorLibraryDirectory { return resolvedVendorLibraryDirectory }
         if AnisetteClient.validateLibrariesExist(at: localLibsDir) {
             return localLibsDir
         }
@@ -481,7 +484,21 @@ public final class AnisetteDataManager: @unchecked Sendable {
     }
 
     private func getClient(for mode: AnisetteMode, clientInfo: String) async throws -> AnisetteClient {
+        resolvedVendorLibraryDirectory = nil
         switch mode {
+        case .verifiedAppleMusic:
+            let directory = try await VerifiedAppleMusicLibraries.prepare(in: baseAnisetteDirectory)
+            try Task.checkCancellation()
+            try FileManager.default.createDirectory(at: provisioningDir, withIntermediateDirectories: true)
+            resolvedVendorLibraryDirectory = directory
+            // Never reuse the unkeyed legacy provider for this source/version.
+            return try AnisetteClient(
+                provisioningDir: provisioningDir, clientInfo: clientInfo,
+                userAgent: Constants.Anisette.defaultUserAgent,
+                lookupURL: Constants.Anisette.URLs.grandSlamLookup,
+                requiredLibraries: Constants.Anisette.Libraries.requiredNames,
+                libraryDirectoryResolver: { directory })
+
         case .remote(let server):
             try FileManager.default.createDirectory(at: provisioningDir, withIntermediateDirectories: true)
             return try AnisetteClient(
