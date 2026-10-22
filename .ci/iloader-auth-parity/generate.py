@@ -50,16 +50,29 @@ def generate(output, sidestore_root=None):
     sidestore_root = sidestore_root or ROOT.parent / 'SideStore'
     factory_path = sidestore_root / 'SideStore/Core/Anisette/AnisetteProvider.swift'
     factory = factory_path.read_text()
-    anchor = '// One credentials Submit owns this experimental route.'
-    assert factory.count(anchor) == 1
-    factory = anchor + factory.split(anchor, 1)[1]
-    content['Types.swift'] += '\n' + factory.replace('SideSign.AnisetteError', 'AnisetteError')
+    # Retain the complete actual attempt, authorization, handoff and continuity
+    # declarations. The dedicated identity suite owns real store/lease execution.
+    begin = '// V3_REMOTE_IDENTITY_RUNTIME_BEGIN'
+    end = '// V3_REMOTE_REQUEST_LEASES_BEGIN'
+    actor = 'private actor ILoaderAttemptAnisetteSource {'
+    assert factory.count(begin) == factory.count(end) == factory.count(actor) == 1
+    attempt_body = factory.split(begin, 1)[1].split(end, 1)[0]
+    source_actor = actor + factory.split(actor, 1)[1]
+    keychain_path = sidestore_root / 'AltStore/Core/Components/Keychain.swift'
+    keychain = keychain_path.read_text()
+    core_begin = '// V3_REMOTE_IDENTITY_RECORD_CORE_BEGIN'
+    core_end = '// V3_REMOTE_IDENTITY_RECORD_CORE_END'
+    assert keychain.count(core_begin) == keychain.count(core_end) == 1
+    record_core = keychain.split(core_begin, 1)[1].split(core_end, 1)[0]
+    content['Types.swift'] += '\n' + record_core + '\n' + (attempt_body + '\n' + source_actor).replace('SideSign.AnisetteError', 'AnisetteError')
+    content['BoundaryDoubles.swift'] += '\n' + (HERE / 'IdentityBoundaryDoubles.swift').read_text()
     for name, text in content.items():
         (output / name).write_text(text)
     assert set(content) == set(OUTPUTS)
     inputs = dict(legacy_evidence['inputs'])
     inputs[str(context_path.relative_to(ROOT))] = digest(context_path)
     inputs['SideStore/SideStore/Core/Anisette/AnisetteProvider.swift'] = digest(factory_path)
+    inputs['SideStore/AltStore/Core/Components/Keychain.swift'] = digest(keychain_path)
     for path in HERE.rglob('*'):
         if path.is_file() and '__pycache__' not in str(path):
             inputs[str(path.relative_to(ROOT))] = digest(path)
@@ -70,7 +83,7 @@ def generate(output, sidestore_root=None):
         'inputs': inputs,
         'outputs': {name: digest(output / name) for name in OUTPUTS},
         'output_closure': list(OUTPUTS),
-        'boundary_replacements': ['URLSession -> FakeSession', 'URLSessionWebSocketTask -> FakeWebSocketTask', 'URLSessionConfiguration -> FakeSessionConfiguration', 'URLSessionTaskDelegate -> FakeSessionTaskDelegate', 'URLSessionTask -> FakeSessionTask', 'synthetic crypto', 'same-file private remote probe supplies a verified synthetic phone'],
+        'boundary_replacements': ['URLSession -> FakeSession', 'URLSessionWebSocketTask -> FakeWebSocketTask', 'URLSessionConfiguration -> FakeSessionConfiguration', 'URLSessionTaskDelegate -> FakeSessionTaskDelegate', 'URLSessionTask -> FakeSessionTask', 'synthetic crypto', 'inert empty identity store/account environment and manual-registry boundary; real persistence and leases covered by remote-identity-reuse', 'same-file private remote probe supplies a verified synthetic phone'],
         'network': False, 'native_provider': False, 'swift_executed': False,
     }
     (output / 'source-evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')

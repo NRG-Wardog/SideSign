@@ -217,11 +217,16 @@ func testProviderLifecycle(_ rows: inout [String]) async throws {
         }
         try requireSessionSecurity(script)
     }
-    let changed = TransportScript([Step(body:try profileBody(syntheticProfile.replacingOccurrences(of:"15.5",with:"15.6")))])
+    let currentProfile = syntheticProfile.replacingOccurrences(of:"15.5",with:"15.6")
+    let changed = TransportScript([Step(body:try profileBody(currentProfile)),Step(body:try headersBody())])
     try await SyntheticTransport.$current.withValue(changed) {
         let client = ILoaderRemoteAnisetteClient()
-        try await expectAsyncThrows("metadata change rejected before headers") { _ = try await client.fetch(state:state()) }
-        try expect(changed.requests.count == 1 && changed.websocketURLs.isEmpty,"no profile fallback or reprovision")
+        let retained = state()
+        let (result, updated) = try await client.fetch(state:retained)
+        try expect(result.clientInfo == currentProfile && updated.profile.clientInfo == currentProfile,"compatible current Mac profile is adopted")
+        try expect(updated.identity == retained.identity && updated.adiPB == retained.adiPB,"compatible profile retains installation identity and registration")
+        try expect(changed.requests.count == 2 && changed.websocketURLs.isEmpty,"no profile fallback or reprovision")
+        try expectJSONBody(changed.requests[1],["identifier":"AAECAwQFBgcICQoLDA0ODw==","adi_pb":"HyAh"],"profile update reuses get_headers identity")
     }
     let error = TransportScript([Step(body:try profileBody()),Step(body:try json(["result":"GetHeadersError","message":"-45061"]))])
     try await SyntheticTransport.$current.withValue(error) {

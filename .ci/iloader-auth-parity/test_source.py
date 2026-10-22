@@ -43,6 +43,43 @@ def top_types(source):
     assert depth == 0, 'Unclosed Swift braces'
     return found
 
+def declaration(source, signature):
+    masked = code_mask(source)
+    start = masked.index(signature)
+    opening = masked.index('{', start)
+    depth = 0
+    for index in range(opening, len(masked)):
+        if masked[index] == '{': depth += 1
+        elif masked[index] == '}':
+            depth -= 1
+            if depth == 0: return source[start:index + 1]
+    raise AssertionError('Unclosed production declaration: '+signature)
+
+def check_profile_continuity(source):
+    # A compatible validated Mac profile may advance at the same endpoint,
+    # without replacing the persisted installation identity or registration.
+    fetch = declaration(source, 'private func fetchValue(')
+    ordered = ['guard state.profile.endpoint == endpoint',
+               'try state.validated(for: state.profile)',
+               'let profile = try await fetchProfile()',
+               'guard profile.endpoint == state.profile.endpoint',
+               'var updated = ILoaderRemoteState(profile: profile, identity: state.identity, adiPB: state.adiPB)',
+               'if updated.adiPB == nil {', 'provision(state: provisioningState)',
+               'updated.headerRequestBody(sim: sim)']
+    positions = [fetch.index(token) for token in ordered]
+    assert positions == sorted(positions), 'Validate endpoint/state before preserving identity and producing headers'
+    assert 'profile == state.profile' not in fetch, 'Compatible same-provider profile versions must not strand identity'
+    assert 'clientInfo: profile.clientInfo, userAgent: profile.userAgent' in fetch
+    current = declaration(source, 'public func fetchProfile()')
+    assert 'return try Self.decodeProfile(data, endpoint: endpoint)' in current
+    decoder = declaration(source, 'nonisolated static func decodeProfile(')
+    for token in ['data.count <= 1_048_576', 'ILoaderAuthenticationPolicy.validHeader(value.client_info)',
+                  'ILoaderAuthenticationPolicy.validHeader(value.user_agent)',
+                  'lower.contains("<mac os x;") || lower.contains("<macos;")',
+                  'lower.contains("com.apple.akd/")', '!lower.contains("<windows;")',
+                  'throw ILoaderRemoteError.providerProfileMismatch']:
+        assert token in decoder, 'Current profile must remain validated: '+token
+
 def check(sidestore_root=None):
     checks = []
     reference = json.loads((HERE/'official-reference.json').read_text())
@@ -66,8 +103,9 @@ def check(sidestore_root=None):
     assert 'request.allHTTPHeaderFields' not in builder
     assert re.search(r'let effectiveHeaders = ILoaderRemoteAuthentication\.current == nil \? headers :\s*ILoaderAuthenticationPolicy\.twoFactorHeaders\(a, dsid: context\.dsid, token: context\.idmsToken, sms: false\)\s*effectiveHeaders\.forEach \{ request\.setValue\(\$1, forHTTPHeaderField: \$0\) \}', builder), '2FA header maps must be exclusive before application'
     source = (ROOT/'Sources/Anisette/ILoaderRemoteAnisette.swift').read_text()
-    for token in ['age >= 0 && age < 61','didResynchronize','Task.checkCancellation()','completionHandler(nil)','httpShouldSetCookies = false','acquisitionTimeoutNanoseconds','withThrowingTaskGroup','state.profile.endpoint == endpoint','profile == state.profile','SHA256.hash(data: identity)']:
+    for token in ['age >= 0 && age < 61','didResynchronize','Task.checkCancellation()','completionHandler(nil)','httpShouldSetCookies = false','acquisitionTimeoutNanoseconds','withThrowingTaskGroup','state.profile.endpoint == endpoint','SHA256.hash(data: identity)']:
         assert token in source, token
+    check_profile_continuity(source)
     for forbidden in ['UserDefaults.', 'Keychain.', 'FileManager.', 'AnisetteDataManager.shared', 'RemoteAnisetteDataProvider(']:
         assert forbidden not in source, forbidden
     checks.append('scoped-lifecycle-no-persistent-or-native-provider')
@@ -98,9 +136,18 @@ def check(sidestore_root=None):
         assert generate.load_legacy().clean((ROOT/'Sources/DeveloperPortal/ILoaderAuthenticationPolicy.swift').read_text()).strip() in types
         factory_root = sidestore_root or ROOT.parent/'SideStore'
         factory = (factory_root/'SideStore/Core/Anisette/AnisetteProvider.swift').read_text()
-        marker = '// One credentials Submit owns this experimental route.'
-        suffix = marker + factory.split(marker,1)[1]
-        assert suffix.replace('SideSign.AnisetteError','AnisetteError') in types
+        for signature in ['struct V3RemoteIdentityHandoff:', 'final class V3RemoteAttemptAuthorization:',
+                          'final class V3RemoteAnisetteAttempt:', 'func makeILoaderRemoteAuthenticationContext()',
+                          'enum V3RemoteIdentityContinuity', 'private actor ILoaderAttemptAnisetteSource']:
+            assert declaration(factory, signature).replace('SideSign.AnisetteError','AnisetteError') in types, signature
+        keychain = (factory_root/'AltStore/Core/Components/Keychain.swift').read_text()
+        record_core = keychain.split('// V3_REMOTE_IDENTITY_RECORD_CORE_BEGIN',1)[1].split('// V3_REMOTE_IDENTITY_RECORD_CORE_END',1)[0]
+        assert record_core in types
+        boundaries = (output/'BoundaryDoubles.swift').read_text()
+        assert (HERE/'IdentityBoundaryDoubles.swift').read_text() in boundaries
+        assert 'func remoteIdentityRecord() throws -> V3RemoteIdentityRecord? { nil }' in boundaries
+        assert 'throw FixtureFailure.unscripted' in boundaries
+        assert receipt['inputs']['SideStore/AltStore/Core/Components/Keychain.swift'] == generate.digest(factory_root/'AltStore/Core/Components/Keychain.swift')
         context = (output/'ILoaderRemoteAnisette.swift').read_text()
         expected = re.sub(r'^import (?:Crypto|CryptoKit|AnisetteKit|GSACryptoKit)\n','',source,flags=re.M)
         for old,new in [('URLSession','FakeSession'),('URLSessionWebSocketTask','FakeWebSocketTask'),('URLSessionConfiguration','FakeSessionConfiguration'),('URLSessionTaskDelegate','FakeSessionTaskDelegate'),('URLSessionTask','FakeSessionTask')]:
@@ -116,6 +163,8 @@ def check(sidestore_root=None):
     tests = (HERE/'RuntimeTests.swift').read_text()
     for token in ['testFactoryLifecycle','testAuthResync','testStageFreshness','testTrustedVerification','testTimeoutAndLateCancellation','60.999','clock.set(61)','same A2k','complete ORIGINAL CPD','error80045','topLevelFallback','jsonFallback','nestedMissingECWins','ILOADER_AUTH_PARITY_FIXTURE_PASS','iloader-auth-parity-cases-v1','AuthenticationDiagnosticTrace.validatedEncodedSnapshot(encoded)','AuthenticationHeaderProvenance(encoded:encoded)','AuthenticationProviderObservation.validatedEncoded(encoded)','testDiagnosticBoundaries','if case .assertion = error { throw error }','hangOnEmpty:true','fixtureRemoteTwoFactor(operation)']:
         assert token in tests,token
+    for token in ['compatible current Mac profile is adopted', 'updated.identity == retained.identity && updated.adiPB == retained.adiPB', 'changed.requests.count == 2 && changed.websocketURLs.isEmpty']:
+        assert token in tests, 'Compatible-profile reuse contract: '+token
     assert not re.search(r'expect\([^\n]*\bawait\b',tests), 'Await in synchronous autoclosure'
     assert 'print("ILOADER_AUTH_PARITY_FIXTURE_PASS")' in tests
     for token in ['try expect(actual == wanted,', 'unexpected=\\(unexpected)', 'missing=\\(missing)', 'changed=\\(changed)']:
