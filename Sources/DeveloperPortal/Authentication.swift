@@ -1127,10 +1127,11 @@ public extension DeveloperPortal {
             "X-Apple-I-TimeZone": a.timeZone,
             "Connection": "close"
         ]
-        headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
-        if ILoaderRemoteAuthentication.current != nil {
-            request.allHTTPHeaderFields = ILoaderAuthenticationPolicy.twoFactorHeaders(a, dsid: context.dsid, token: context.idmsToken, sms: false)
-        }
+        // Choose once before applying headers: Foundation need not remove old fields
+        // when allHTTPHeaderFields is assigned after individual legacy fields.
+        let effectiveHeaders = ILoaderRemoteAuthentication.current == nil ? headers :
+            ILoaderAuthenticationPolicy.twoFactorHeaders(a, dsid: context.dsid, token: context.idmsToken, sms: false)
+        effectiveHeaders.forEach { request.setValue($1, forHTTPHeaderField: $0) }
         return request
     }
 

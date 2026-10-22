@@ -41,7 +41,13 @@ func canonicalHeaders(_ headers: [String: String]) -> [String: String] {
     Dictionary(uniqueKeysWithValues: headers.map { ($0.key.lowercased(), $0.value) })
 }
 func expectHeaders(_ request: URLRequest, _ expected: [String: String], _ label: String) throws {
-    try expect(canonicalHeaders(request.allHTTPHeaderFields ?? [:]) == canonicalHeaders(expected), "exact complete header dictionary: \(label)")
+    let actual = canonicalHeaders(request.allHTTPHeaderFields ?? [:])
+    let wanted = canonicalHeaders(expected)
+    let unexpected = Set(actual.keys).subtracting(wanted.keys).sorted()
+    let missing = Set(wanted.keys).subtracting(actual.keys).sorted()
+    // Keep the complete comparison, but reveal only differing header names.
+    let changed = Set(actual.keys).intersection(wanted.keys).filter { actual[$0] != wanted[$0] }.sorted()
+    try expect(actual == wanted, "exact complete header dictionary: \(label); unexpected=\(unexpected); missing=\(missing); changed=\(changed)")
 }
 func decodedBody(_ request: URLRequest) throws -> [String: Any] {
     guard let body = request.httpBody, let dictionary = try PropertyListSerialization.propertyList(from: body, format: nil) as? [String: Any] else { throw FixtureFailure.assertion("expected plist request body") }

@@ -258,5 +258,10 @@
     "    private func parsePlistOrJSON(_ data: Data, observation: AuthenticationDiagnosticTrace.Request? = nil) -> [String: any Sendable]? {",
     "    private func observeILoaderJSON(_ data: Data, observation: AuthenticationDiagnosticTrace.Request?) {\n        let object = try? JSONSerialization.jsonObject(with: data)\n        observation?.parser(plist: nil, json: object, selected: object is [String: Any] ? \"json\" : \"failure\")\n    }\n\n    private func parsePlistOrJSON(_ data: Data, observation: AuthenticationDiagnosticTrace.Request? = nil) -> [String: any Sendable]? {",
     1
+  ],
+  [
+    "        headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }\n        if ILoaderRemoteAuthentication.current != nil {\n            request.allHTTPHeaderFields = ILoaderAuthenticationPolicy.twoFactorHeaders(a, dsid: context.dsid, token: context.idmsToken, sms: false)\n        }",
+    "        // Choose once before applying headers: Foundation need not remove old fields\n        // when allHTTPHeaderFields is assigned after individual legacy fields.\n        let effectiveHeaders = ILoaderRemoteAuthentication.current == nil ? headers :\n            ILoaderAuthenticationPolicy.twoFactorHeaders(a, dsid: context.dsid, token: context.idmsToken, sms: false)\n        effectiveHeaders.forEach { request.setValue($1, forHTTPHeaderField: $0) }",
+    1
   ]
 ]

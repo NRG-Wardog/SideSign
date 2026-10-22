@@ -58,6 +58,13 @@ def check(sidestore_root=None):
     baseline = HERE.parent/'auth-request-diagnostics/baseline/Authentication.swift'
     assert projected == baseline.read_text() and generate.digest(baseline) == generate.load_legacy().BASE_SHA
     checks.append('two-layer-exact-original-baseline-projection')
+    # Darwin request header assignment must never inherit the legacy header set.
+    # Require the actual production builder to choose the complete map first,
+    # then apply it once to the fresh request, retaining the nil-context branch.
+    builder = code_mask(auth.split('private func makeTwoFactorAuthRequest(', 1)[1].split('private func refreshedILoaderContext(', 1)[0])
+    assert builder.count('request.setValue(') == 1
+    assert 'request.allHTTPHeaderFields' not in builder
+    assert re.search(r'let effectiveHeaders = ILoaderRemoteAuthentication\.current == nil \? headers :\s*ILoaderAuthenticationPolicy\.twoFactorHeaders\(a, dsid: context\.dsid, token: context\.idmsToken, sms: false\)\s*effectiveHeaders\.forEach \{ request\.setValue\(\$1, forHTTPHeaderField: \$0\) \}', builder), '2FA header maps must be exclusive before application'
     source = (ROOT/'Sources/Anisette/ILoaderRemoteAnisette.swift').read_text()
     for token in ['age >= 0 && age < 61','didResynchronize','Task.checkCancellation()','completionHandler(nil)','httpShouldSetCookies = false','acquisitionTimeoutNanoseconds','withThrowingTaskGroup','state.profile.endpoint == endpoint','profile == state.profile','SHA256.hash(data: identity)']:
         assert token in source, token
@@ -111,6 +118,8 @@ def check(sidestore_root=None):
         assert token in tests,token
     assert not re.search(r'expect\([^\n]*\bawait\b',tests), 'Await in synchronous autoclosure'
     assert 'print("ILOADER_AUTH_PARITY_FIXTURE_PASS")' in tests
+    for token in ['try expect(actual == wanted,', 'unexpected=\\(unexpected)', 'missing=\\(missing)', 'changed=\\(changed)']:
+        assert token in tests, 'Exact header comparison and key-only delta required: '+token
     assert 'knownPhoneNumbers:[TrustedPhoneNumber(id:"1",number:"synthetic-number")]' in (HERE/'PrivateProbes.swift').read_text()
     checks.append('runtime-vector-and-export-contract')
     return {'schema':'iloader-auth-parity-static-v1','checks':checks,'check_count':len(checks),'swift_executed':False}
