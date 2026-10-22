@@ -32,6 +32,8 @@ def generate(output):
  # The only omitted AnisetteData member is an unrelated outbound conversion method.
  types+=anisette.split('    public func toRequestHeaders()',1)[0]+'}\n'
  types+=read('Sources/Models/Session.swift')
+ # Compile the actual opt-in request policy, while legacy runtime has nil context.
+ types+=read('Sources/DeveloperPortal/ILoaderAuthenticationPolicy.swift')
  types='import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n#endif\n'+clean(types)
  prefix='import Foundation\n#if canImport(FoundationNetworking)\nimport FoundationNetworking\n#endif\n'
  generated={

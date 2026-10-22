@@ -30,8 +30,11 @@ public extension DeveloperPortal {
         var activeSpan = trace?.begin(.authSRPInit)
         do {
             let sanitizedAppleID = unsanitizedAppleID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let remoteContext = ILoaderRemoteAuthentication.current
+            var anisetteData = anisetteData
+            if let remoteContext { anisetteData = try await remoteContext.fetch() }
 
-            let clientDictionary: [String: any Sendable] = [
+            let clientDictionary: [String: any Sendable] = remoteContext == nil ? [
                 "bootstrap": true,
                 "icscrec": true,
                 "pbe": false,
@@ -47,7 +50,7 @@ public extension DeveloperPortal {
                 "X-Apple-I-SRL-NO": anisetteData.serialNumber,
                 "X-Apple-I-Client-Time": anisetteData.clientTime,
                 "X-Apple-I-TimeZone": anisetteData.timeZone
-            ]
+            ] : ILoaderAuthenticationPolicy.clientDictionary(anisetteData)
 
             diagnostic?.authentication(.srpInit)
             guard let srpClient = SRPClient(),
@@ -57,7 +60,7 @@ public extension DeveloperPortal {
             }
 
             // 1. Send authentication 'init' request
-            let initParameters: [String: any Sendable] = [
+            var initParameters: [String: any Sendable] = [
                 "A2k": publicKey,
                 "cpd": clientDictionary,
                 "ps": ["s2k", "s2k_fo"],
@@ -65,7 +68,21 @@ public extension DeveloperPortal {
                 "u": sanitizedAppleID
             ]
 
-            let (initResponse, initObservation) = try await sendObservedAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)
+            var (initResponse, initObservation) = try await sendObservedAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)
+            if let remoteContext,
+               let status = initResponse["Status"] as? [String: any Sendable], ILoaderAuthenticationPolicy.signedInteger(status["hsc"]) == 434 {
+                guard let sim = ILoaderAuthenticationPolicy.resyncSIM(initResponse), !sim.isEmpty else {
+                    throw DeveloperPortalError.authenticationHandshakeFailed(cause: "The bounded anisette resynchronization could not complete.")
+                }
+                initObservation?.consumer(.initFields, .retry)
+                anisetteData = try await remoteContext.resynchronize(sim: sim)
+                initParameters["cpd"] = ILoaderAuthenticationPolicy.clientDictionary(anisetteData)
+                // Official isideload reuses A2k on resync, but complete retains the original CPD.
+                (initResponse, initObservation) = try await sendObservedAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)
+                if let status = initResponse["Status"] as? [String: any Sendable], ILoaderAuthenticationPolicy.signedInteger(status["hsc"]) == 434 {
+                    throw DeveloperPortalError.authenticationHandshakeFailed(cause: "The bounded anisette resynchronization could not complete.")
+                }
+            }
 
             guard let c = initResponse["c"] as? String,
                   let salt = initResponse["s"] as? Data,
@@ -77,11 +94,18 @@ public extension DeveloperPortal {
                 throw ServerError.badServerResponse(reason: "Auth init response missing c/s/i/B parameters", jsonPayload: payload)
             }
 
+            if remoteContext != nil, ILoaderAuthenticationPolicy.signedInteger(initResponse["i"]) == nil || iterations <= 0 {
+                initObservation?.consumer(.initFields, .failed)
+                throw ServerError.badServerResponse(reason: "Invalid iLoader authentication response.", jsonPayload: "")
+            }
             activeSpan?.finish(.succeeded)
             initObservation?.consumer(.initFields, .passed)
             activeSpan = trace?.begin(.authSRPChallenge)
 
             let sp = initResponse["sp"] as? String
+            if remoteContext != nil, sp != "s2k" && sp != "s2k_fo" {
+                throw DeveloperPortalError.authenticationHandshakeFailed(cause: "Unsupported SRP protocol selected")
+            }
             let isHexadecimal = (sp == "s2k_fo")
 
             diagnostic?.authentication(.hash)
@@ -276,7 +300,8 @@ public extension DeveloperPortal {
                 throw ServerError.missingKey(key: "c", jsonPayload: prettyJSONString(from: decryptedDictionary))
             }
 
-            let app = customHeaders.grandSlam.authApp
+            if let remoteContext { anisetteData = try await remoteContext.fetch() }
+            let app = remoteContext == nil ? customHeaders.grandSlam.authApp : "com.apple.gs.xcode.auth"
             diagnostic?.authentication(.checksum)
             guard let checksum = CryptoUtilities.hmacSHA256(key: sessionKey, strings: ["apptokens", dsid, app]) else {
                 completeObservation?.consumer(.checksum, .failed)
@@ -287,7 +312,7 @@ public extension DeveloperPortal {
                 "app": [app],
                 "c": c,
                 "checksum": checksum,
-                "cpd": clientDictionary,
+                "cpd": remoteContext == nil ? clientDictionary : ILoaderAuthenticationPolicy.clientDictionary(anisetteData),
                 "o": "apptokens",
                 "t": idmsToken,
                 "u": dsid
@@ -328,7 +353,15 @@ public extension DeveloperPortal {
     private func sendObservedAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData) async throws -> ([String: any Sendable], AuthenticationDiagnosticTrace.Request?) {
         let diagnostic = AuthenticationDiagnosticTrace.current
         let requestURL = Constants.URLs.grandSlamAuth
-        let diagnosticHeaders = diagnosticCustomHeadersSnapshot()
+        var diagnosticHeaders = diagnosticCustomHeadersSnapshot()
+        if ILoaderRemoteAuthentication.current != nil {
+            var effective = diagnosticHeaders.headers
+            effective.grandSlam.userAgent = anisetteData.userAgent
+            effective.grandSlam.headerVersion = "1.0.1"
+            effective.grandSlam.service = "iCloud"
+            effective.grandSlam.authApp = "com.apple.gs.xcode.auth"
+            diagnosticHeaders = DiagnosticCustomHeadersSnapshot(headers: effective, source: .provider)
+        }
         let h = diagnosticHeaders.headers
 
         let parameters: [String: any Sendable] = [
@@ -354,13 +387,16 @@ public extension DeveloperPortal {
             "Connection": "close"
         ]
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if ILoaderRemoteAuthentication.current != nil {
+            request.allHTTPHeaderFields = ILoaderAuthenticationPolicy.baseHeaders(clientInfo: anisetteData.clientInfo, userAgent: anisetteData.userAgent)
+        }
 
         let observation = diagnostic?.beginRequest(request, phase: requestParameters["o"] as? String ?? "unknown",
             parameters: requestParameters, headerVersion: h.grandSlam.headerVersion,
             provenance: AuthenticationHeaderProvenance(anisetteData: anisetteData, grandSlamHeaders: diagnosticHeaders).encoded)
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: request)
         } catch {
             observation?.transport(error)
             throw error
@@ -369,18 +405,30 @@ public extension DeveloperPortal {
 
         let httpResponse = response as? HTTPURLResponse
         let statusCode = httpResponse?.statusCode ?? 0
+        if ILoaderRemoteAuthentication.current != nil, !(200..<300).contains(statusCode) {
+            observation?.finish(.rejected, reason: .http)
+            throw ServerError.invalidResponseFormat(rawPayload: "", responseContext: AuthenticationResponseContext(data: data, httpStatus: statusCode, mimeType: (response as? HTTPURLResponse)?.mimeType))
+        }
 
         guard !data.isEmpty else {
             observation?.finish(.empty)
             throw ServerError.badServerResponse(reason: "Auth endpoint returned empty response (0 bytes)", jsonPayload: "0 bytes")
         }
 
-        guard let responseDictionary = parsePlistOrJSON(data, observation: observation) else {
+        let decodedResponse = ILoaderRemoteAuthentication.current == nil
+            ? parsePlistOrJSON(data, observation: observation)
+            : parseILoaderPlist(data, observation: observation)
+        guard let responseDictionary = decodedResponse else {
             observation?.finish(.parse)
             let context = AuthenticationResponseContext(data: data, httpStatus: statusCode, mimeType: response.mimeType)
             throw ServerError.invalidResponseFormat(rawPayload: "[redacted]", responseContext: context)
         }
 
+        if ILoaderRemoteAuthentication.current != nil,
+           !(responseDictionary["Response"] is [String: any Sendable]) {
+            observation?.finish(.parse)
+            throw ServerError.badServerResponse(reason: "Invalid iLoader authentication response.", jsonPayload: "")
+        }
         let dictionary = (responseDictionary["Response"] as? [String: any Sendable]) ?? responseDictionary
         observation?.envelope(responseDictionary, nested: responseDictionary["Response"] is [String: any Sendable])
         guard let status = dictionary["Status"] as? [String: any Sendable] else {
@@ -390,8 +438,17 @@ public extension DeveloperPortal {
             throw ServerError.missingKey(key: "Status", jsonPayload: rawStr)
         }
 
-        let errorCode = status["ec"] as? Int ?? 0
-        observation?.status(status, ec: status["ec"], hsc: status["hsc"], effective: errorCode, source: "status")
+        if ILoaderRemoteAuthentication.current != nil, ILoaderAuthenticationPolicy.signedInteger(status["hsc"]) == 434 {
+            observation?.status(status, ec: status["ec"], hsc: status["hsc"], effective: ILoaderAuthenticationPolicy.signedInteger(status["ec"]) ?? 0, source: "status", strictIntegerConsumer: true)
+            guard requestParameters["o"] as? String == "init" else {
+                observation?.finish(.rejected, reason: .underlying)
+                throw DeveloperPortalError.authenticationHandshakeFailed(cause: "The bounded anisette resynchronization could not complete.")
+            }
+            observation?.finish(.accepted)
+            return (dictionary, observation)
+        }
+        let errorCode = ILoaderRemoteAuthentication.current == nil ? (status["ec"] as? Int ?? 0) : (ILoaderAuthenticationPolicy.signedInteger(status["ec"]) ?? 0)
+        observation?.status(status, ec: status["ec"], hsc: status["hsc"], effective: errorCode, source: "status", strictIntegerConsumer: ILoaderRemoteAuthentication.current != nil)
         if errorCode != 0 {
             let errorDesc = status["em"] as? String
             switch errorCode {
@@ -625,6 +682,9 @@ public extension DeveloperPortal {
                 phoneNumbers = parseTrustedPhoneNumbers(from: statusDictionary)
             }
 
+            if ILoaderRemoteAuthentication.current != nil, phoneNumbers.isEmpty {
+                phoneNumbers = try await fetchILoaderTrustedNumbers(context: context)
+            }
             let preferredMode: TwoFactorDeliveryMode = isTrustedDevice ? .trustedDevice : .sms
 
             var currentRequest: TwoFactorRequest = codeAlreadySent
@@ -709,17 +769,20 @@ public extension DeveloperPortal {
         let span = LoginDiagnosticTrace.current?.begin(.twoFactorRequest)
         var observation: AuthenticationDiagnosticTrace.Request?
         do {
+            let context = try await refreshedILoaderContext(context)
             var request = makeTwoFactorAuthRequest(url: Constants.URLs.trustedDevice, context: context)
             request.httpMethod = "GET"
 
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: "trustedRequest")
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: request)
             observation?.response(request: request, data: data, response: response)
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.safeStatusCode ?? 0
-            try throwIfXMLUIErrorAlert(in: data, statusCode: statusCode, actionName: "sendTrustedDevice2FACodeRequest", observation: observation)
+            if ILoaderRemoteAuthentication.current == nil {
+                try throwIfXMLUIErrorAlert(in: data, statusCode: statusCode, actionName: "sendTrustedDevice2FACodeRequest", observation: observation)
+            }
 
-            guard statusCode == HTTPStatusCodes.ok else {
+            guard ILoaderRemoteAuthentication.current == nil ? statusCode == HTTPStatusCodes.ok : (200..<300).contains(statusCode) else {
                 observation?.consumer(.http, .failed)
                 observation?.finish(.rejected, reason: .http)
                 let rawStr = prettyJSONString(from: data)
@@ -743,6 +806,19 @@ public extension DeveloperPortal {
         let span = LoginDiagnosticTrace.current?.begin(.twoFactorRequest)
         var observation: AuthenticationDiagnosticTrace.Request?
         do {
+            if ILoaderRemoteAuthentication.current != nil {
+                guard requestedMode == "sms" else { throw DeveloperPortalError.invalid2FAResponse(cause: "This remote route supports SMS or trusted-device verification, not voice.") }
+                let selectedID = requestedPhoneID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let target: String
+                if selectedID.isEmpty, knownPhoneNumbers.count == 1 { target = knownPhoneNumbers[0].id }
+                else { target = selectedID }
+                guard !target.isEmpty, knownPhoneNumbers.contains(where: { $0.id == target }) else {
+                    throw DeveloperPortalError.invalid2FAResponse(cause: "Select a verified trusted phone number, or use trusted-device verification.")
+                }
+                let result = try await sendILoaderPhoneCode(phoneID: target, knownPhoneNumbers: knownPhoneNumbers, context: context)
+                span?.finish(.succeeded)
+                return result
+            }
             let sanitizedPhoneID: String = {
                 if let id = requestedPhoneID?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
                     return id
@@ -766,7 +842,7 @@ public extension DeveloperPortal {
 
             diagnosticSerialized = true
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: "phoneRequest")
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: request)
             observation?.response(request: request, data: data, response: response)
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.safeStatusCode ?? 0
@@ -858,11 +934,12 @@ public extension DeveloperPortal {
         let span = LoginDiagnosticTrace.current?.begin(.twoFactorVerify)
         var observation: AuthenticationDiagnosticTrace.Request?
         do {
+            let context = try await refreshedILoaderContext(context)
             var verifyRequest = makeTwoFactorAuthRequest(url: Constants.URLs.grandSlamValidate, context: context)
             verifyRequest.setValue(code, forHTTPHeaderField: "security-code")
 
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(verifyRequest, phase: "trustedVerify")
-            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)
+            let (verifyData, verifyResponse) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: verifyRequest)
             observation?.response(request: verifyRequest, data: verifyData, response: verifyResponse)
             let verifyHttpResponse = verifyResponse as? HTTPURLResponse
             let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0
@@ -885,6 +962,12 @@ public extension DeveloperPortal {
         let span = LoginDiagnosticTrace.current?.begin(.twoFactorVerify)
         var observation: AuthenticationDiagnosticTrace.Request?
         do {
+            if ILoaderRemoteAuthentication.current != nil {
+                guard mode == "sms" else { throw DeveloperPortalError.invalid2FAResponse(cause: "This remote route supports SMS or trusted-device verification, not voice.") }
+                let result = try await verifyILoaderPhoneCode(code: code, phoneID: phoneID, context: context)
+                finishTwoFactorVerificationSpan(span, result: result)
+                return result
+            }
             var verifyRequest = makeTwoFactorAuthRequest(url: Constants.URLs.phoneSecurityCode, context: context)
             verifyRequest.httpMethod = "POST"
             AuthenticationDiagnosticTrace.current?.authentication(.serialization)
@@ -897,7 +980,7 @@ public extension DeveloperPortal {
 
             diagnosticSerialized = true
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(verifyRequest, phase: "phoneVerify")
-            let (verifyData, verifyResponse) = try await session.data(for: verifyRequest)
+            let (verifyData, verifyResponse) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: verifyRequest)
             observation?.response(request: verifyRequest, data: verifyData, response: verifyResponse)
             let verifyHttpResponse = verifyResponse as? HTTPURLResponse
             let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0
@@ -955,11 +1038,19 @@ public extension DeveloperPortal {
                                                   httpResponse: HTTPURLResponse?,
                                                   observation: AuthenticationDiagnosticTrace.Request? = nil) throws -> TwoFactorAuthValidationResult
     {
-        let verifyDictionary = parsePlistOrJSON(data, observation: observation)
+        let verifyDictionary = ILoaderRemoteAuthentication.current == nil
+            ? parsePlistOrJSON(data, observation: observation)
+            : parseILoaderPlist(data, observation: observation)
+        if ILoaderRemoteAuthentication.current != nil, verifyDictionary == nil {
+            observation?.finish(.parse)
+            throw ServerError.badServerResponse(reason: "Invalid iLoader authentication response.", jsonPayload: "")
+        }
         let (xmluiTitle, xmluiMessage) = parseXMLUIAlertMessage(from: data)
-        let errorCode = verifyDictionary?["ec"] as? Int ?? 0
+        let errorCode = ILoaderRemoteAuthentication.current == nil
+            ? (verifyDictionary?["ec"] as? Int ?? 0)
+            : (ILoaderAuthenticationPolicy.signedInteger(((verifyDictionary?["Status"] as? [String: any Sendable]) ?? verifyDictionary)?["ec"]) ?? 0)
         let statusDict = verifyDictionary?["Status"] as? [String: any Sendable]
-        observation?.status(verifyDictionary?["Status"], ec: verifyDictionary?["ec"], hsc: statusDict?["hsc"], effective: errorCode, source: "top")
+        observation?.status(verifyDictionary?["Status"], ec: ILoaderRemoteAuthentication.current == nil ? verifyDictionary?["ec"] : (statusDict ?? verifyDictionary)?["ec"], hsc: statusDict?["hsc"], effective: errorCode, source: ILoaderRemoteAuthentication.current != nil && statusDict != nil ? "status" : "top", strictIntegerConsumer: ILoaderRemoteAuthentication.current != nil)
         let errorMsg = (verifyDictionary?["em"] as? String)
                     ?? (statusDict?["em"] as? String)
                     ?? xmluiMessage
@@ -990,7 +1081,7 @@ public extension DeveloperPortal {
             throw DeveloperPortalError.invalid2FAResponse(cause: message)
         }
 
-        guard statusCode == HTTPStatusCodes.ok else {
+        guard ILoaderRemoteAuthentication.current == nil ? statusCode == HTTPStatusCodes.ok : (200..<300).contains(statusCode) else {
             observation?.consumer(.http, .retry)
             observation?.finish(.rejected, reason: statusCode >= 500 || statusCode == 0 ? .serviceUnavailable : .unknown)
             return .retry(statusCode >= 500 || statusCode == 0 ? .serviceUnavailable : .unknown)
@@ -1037,7 +1128,115 @@ public extension DeveloperPortal {
             "Connection": "close"
         ]
         headers.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if ILoaderRemoteAuthentication.current != nil {
+            request.allHTTPHeaderFields = ILoaderAuthenticationPolicy.twoFactorHeaders(a, dsid: context.dsid, token: context.idmsToken, sms: false)
+        }
         return request
+    }
+
+    private func refreshedILoaderContext(_ context: TwoFactorAuthContext) async throws -> TwoFactorAuthContext {
+        guard let remote = ILoaderRemoteAuthentication.current else { return context }
+        let data = try await remote.fetch()
+        return TwoFactorAuthContext(dsid: context.dsid, idmsToken: context.idmsToken,
+            anisetteData: data, xcodeVersion: context.xcodeVersion)
+    }
+
+    private func parseILoaderPlist(_ data: Data, observation: AuthenticationDiagnosticTrace.Request?) -> [String: any Sendable]? {
+        let plist = try? PropertyListSerialization.propertyList(from: data, format: nil)
+        let dictionary = plist as? [String: any Sendable]
+        observation?.parser(plist: plist, json: nil, selected: dictionary == nil ? "failure" : "plist")
+        return dictionary
+    }
+
+    private func fetchILoaderTrustedNumbers(context: TwoFactorAuthContext) async throws -> [TrustedPhoneNumber] {
+        guard let remote = ILoaderRemoteAuthentication.current else { throw ILoaderRemoteError.consentRequired }
+        let context = try await refreshedILoaderContext(context)
+        let request = ILoaderAuthenticationPolicy.trustedNumbersRequest(data: context.anisetteData, dsid: context.dsid, token: context.idmsToken)
+        let observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: "unknown")
+        let data: Data
+        do {
+            let (received, response) = try await remote.session.data(for: request)
+            data = received
+            observation?.response(request: request, data: data, response: response)
+        } catch {
+            observation?.transport(error)
+            if error is CancellationError || (error as? URLError)?.code == .cancelled { throw error }
+            // Optional discovery failure does not block trusted-device verification.
+            return []
+        }
+        do {
+            observeILoaderJSON(data, observation: observation)
+            let numbers = try ILoaderAuthenticationPolicy.trustedNumbers(data)
+            observation?.finish(.accepted)
+            return numbers
+        } catch {
+            observation?.finish(.parse)
+            return []
+        }
+    }
+
+    private func sendILoaderPhoneCode(phoneID: String, knownPhoneNumbers: [TrustedPhoneNumber], context: TwoFactorAuthContext) async throws -> TwoFactorAuthPhoneCodeResponse {
+        guard let remote = ILoaderRemoteAuthentication.current, let id = UInt32(phoneID) else { throw DeveloperPortalError.invalid2FAResponse(cause: "A verified trusted phone number is required.") }
+        let context = try await refreshedILoaderContext(context)
+        let request = try ILoaderAuthenticationPolicy.phoneRequest(data: context.anisetteData,
+            dsid: context.dsid, token: context.idmsToken, phoneID: id, code: nil)
+        let observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: "phoneRequest")
+        do {
+            let (data, response) = try await remote.session.data(for: request)
+            observation?.response(request: request, data: data, response: response)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if !(200..<300).contains(status) { observeILoaderJSON(data, observation: observation) }
+            let result = ILoaderAuthenticationPolicy.classifySMS(status: status, data: data, phoneID: id, verifying: false)
+            switch result {
+            case .accepted:
+                observation?.finish(.accepted)
+                return TwoFactorAuthPhoneCodeResponse(phoneID: String(id), activeMode: "sms", phoneNumbers: knownPhoneNumbers, statusCode: status)
+            case .incorrectCode:
+                observation?.finish(.rejected, reason: .incorrectCode)
+                throw DeveloperPortalError.incorrectVerificationCode(cause: nil)
+            case .rejected(let code):
+                observation?.finish(.rejected, reason: .underlying)
+                if code == "-22979" || code == "-22981" {
+                    return TwoFactorAuthPhoneCodeResponse(phoneID: String(id), activeMode: "sms", phoneNumbers: knownPhoneNumbers, statusCode: status)
+                }
+                throw DeveloperPortalError.invalid2FAResponse(cause: "Apple did not accept the SMS request.")
+            }
+        } catch {
+            observation?.transport(error)
+            throw error
+        }
+    }
+
+    private func verifyILoaderPhoneCode(code: String, phoneID: String, context: TwoFactorAuthContext) async throws -> TwoFactorAuthValidationResult {
+        guard let remote = ILoaderRemoteAuthentication.current, let id = UInt32(phoneID) else { throw DeveloperPortalError.invalid2FAResponse(cause: "A verified trusted phone number is required.") }
+        let context = try await refreshedILoaderContext(context)
+        let request = try ILoaderAuthenticationPolicy.phoneRequest(data: context.anisetteData,
+            dsid: context.dsid, token: context.idmsToken, phoneID: id, code: code)
+        let observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: "phoneVerify")
+        do {
+            let (data, response) = try await remote.session.data(for: request)
+            observation?.response(request: request, data: data, response: response)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if !(200..<300).contains(status) { observeILoaderJSON(data, observation: observation) }
+            switch ILoaderAuthenticationPolicy.classifySMS(status: status, data: data, phoneID: id, verifying: true) {
+            case .accepted: observation?.finish(.accepted); return .success
+            case .incorrectCode:
+                observation?.consumer(.verify, .retry)
+                observation?.finish(.rejected, reason: .incorrectCode)
+                return .retry(.incorrectCode)
+            case .rejected:
+                observation?.finish(.rejected, reason: .underlying)
+                throw DeveloperPortalError.invalid2FAResponse(cause: "Apple did not accept the SMS verification.")
+            }
+        } catch {
+            observation?.transport(error)
+            throw error
+        }
+    }
+
+    private func observeILoaderJSON(_ data: Data, observation: AuthenticationDiagnosticTrace.Request?) {
+        let object = try? JSONSerialization.jsonObject(with: data)
+        observation?.parser(plist: nil, json: object, selected: object is [String: Any] ? "json" : "failure")
     }
 
     private func parsePlistOrJSON(_ data: Data, observation: AuthenticationDiagnosticTrace.Request? = nil) -> [String: any Sendable]? {

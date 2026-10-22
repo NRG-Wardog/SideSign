@@ -79,12 +79,17 @@ public final class AuthenticationDiagnosticTrace: @unchecked Sendable {
         func envelope(_ outer: [String: any Sendable], nested: Bool) {
             owner?.mutate(self) { $0[22] = nested ? "nested" : (outer["Response"] == nil ? "topMissing" : "topWrong") }
         }
-        func status(_ value: Any?, ec: Any?, hsc: Any?, effective: Int?, source: String) {
+        func status(_ value: Any?, ec: Any?, hsc: Any?, effective: Int?, source: String, strictIntegerConsumer: Bool = false) {
             owner?.mutate(self) {
                 $0[23] = value == nil ? "missing" : (value is [String: any Sendable] ? "dictionary" : "wrong")
                 $0[24] = AuthenticationDiagnosticTrace.strictNumber(ec, hsc: false)
                 $0[25] = AuthenticationDiagnosticTrace.strictNumber(hsc, hsc: true)
-                $0[26] = effective == nil ? "unobserved" : ((ec as? Int) == nil ? "default" : "cast")
+                let integerAccepted: Bool
+                if strictIntegerConsumer, let number = ec as? NSNumber {
+                    integerAccepted = CFGetTypeID(number) != CFBooleanGetTypeID() &&
+                        !["f", "d"].contains(String(cString: number.objCType)) && Int(number.stringValue) != nil
+                } else { integerAccepted = !strictIntegerConsumer && (ec as? Int) != nil }
+                $0[26] = effective == nil ? "unobserved" : (integerAccepted ? "cast" : "default")
                 if let effective { $0[27] = (-99_999_999...99_999_999).contains(effective) ? String(effective) : "out" }
                 $0[28] = source
                 if source == "top" { $0[22] = "topOnly" }
@@ -332,8 +337,8 @@ public final class AuthenticationDiagnosticTrace: @unchecked Sendable {
         if url == Constants.URLs.grandSlamAuth { return "gsa" }
         if url == Constants.URLs.trustedDevice { return "trusted" }
         if url == Constants.URLs.grandSlamValidate { return "validate" }
-        if url == Constants.URLs.phoneSecurityCode { return "phoneVerify" }
-        if url == Constants.URLs.phonePutURL(mode: "sms") || url == Constants.URLs.phonePutURL(mode: "voice") { return "phoneRequest" }
+        if url == Constants.URLs.phoneSecurityCode || url == URL(string: "https://gsa.apple.com/auth/verify/phone/securitycode") { return "phoneVerify" }
+        if url == Constants.URLs.phonePutURL(mode: "sms") || url == Constants.URLs.phonePutURL(mode: "voice") || url == URL(string: "https://gsa.apple.com/auth/verify/phone") { return "phoneRequest" }
         return host == "apple.com" || host.hasSuffix(".apple.com") ? "apple" : "other"
     }
     private static func relation(_ a: URL?, _ b: URL?) -> String {

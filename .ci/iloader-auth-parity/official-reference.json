@@ -1,0 +1,42 @@
+{
+  "schema": "iloader-official-source-reference-v1",
+  "ref": "fc7a81a6de678aa707e05399ffafb8be0ad56921",
+  "source": "https://github.com/nab138/iloader/tree/fc7a81a6de678aa707e05399ffafb8be0ad56921",
+  "files": {
+    "isideload/src/auth/apple_account.rs": "c91c4fdd38d880394eb72238fc1b43e02c72677ac316e6f706258b426f778f76",
+    "isideload/src/auth/grandslam.rs": "fc5bbae693dc4e0cadcaace2178fa33368f74fb7c29198aa4b9c66f329f29353",
+    "isideload/src/anisette/mod.rs": "938324b2db80a4c906f72beb4e19ebdda54e55a3af298e5e975dbbdf482a6f2c",
+    "isideload/src/anisette/remote_v3/mod.rs": "59788a8dc0814c46681fd98cace6d5952f38a8f2100ed0a96e159bdcc0c9a7eb",
+    "isideload/src/anisette/remote_v3/state.rs": "76b05d423274eb9447fa46a3f3740e21087c71176552d44f1c22ada3118fdb76"
+  },
+  "scope": "Request/data lifecycle parity, not crypto equivalence or Apple acceptance",
+  "expectations": {
+    "cpd_strings": {
+      "bootstrap": "true",
+      "icscrec": "true",
+      "loc": "en_US",
+      "pbe": "false",
+      "prkgen": "true",
+      "svct": "iCloud"
+    },
+    "cpd_data_keys": [
+      "X-Mme-Device-Id",
+      "X-Apple-I-MD",
+      "X-Apple-I-MD-M"
+    ],
+    "base_headers": {
+      "Content-Type": "text/x-xml-plist",
+      "Accept": "text/x-xml-plist",
+      "X-Xcode-Version": "27.0 (27A5218g)",
+      "X-Apple-App-Info": "com.apple.gs.xcode.auth",
+      "Connection": "close"
+    },
+    "url_bag_client_info": "<Mac15,7> <macOS;27.0;26A5378j> <com.apple.AuthKit/1 (com.apple.akd/1.0)>",
+    "url_bag": "https://gsa.apple.com/grandslam/GsService2/lookup",
+    "cache_elapsed_whole_seconds_maximum": 60,
+    "resync_init_maximum": 1,
+    "resync_uses_same_a2k": true,
+    "complete_uses_original_cpd": true,
+    "resync_status_hsc": 434
+  }
+}

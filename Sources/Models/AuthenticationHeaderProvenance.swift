@@ -19,7 +19,7 @@ public enum AuthenticationHeaderFamily: String, Sendable {
         if lower.contains("windows") { return .windows }
         if lower.contains("com.apple.akd/") {
             if lower.contains("android") { return .androidAkd }
-            if lower.contains("<mac") && lower.contains("macos") { return .macAkd }
+            if lower.contains("<mac") && (lower.contains("macos") || lower.contains("mac os x")) { return .macAkd }
         }
         // AuthKit's Macintosh User-Agent alone does not establish an akd profile.
         return .other

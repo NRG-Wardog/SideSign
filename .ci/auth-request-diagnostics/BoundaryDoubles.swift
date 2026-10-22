@@ -44,11 +44,15 @@ struct Step: @unchecked Sendable {
     var error: Error? = nil
     var entered: SyntheticLatch? = nil
     var release: SyntheticLatch? = nil
+    var onResponse: (@Sendable () -> Void)? = nil
+    var delayNanoseconds: UInt64? = nil
 }
 public final class FakeSession: @unchecked Sendable {
     private let lock = NSLock()
     private var steps: [Step]
     private var recorded: [URLRequest] = []
+    var syntheticForward: (@Sendable (URLRequest) async throws -> (Data, URLResponse))?
+    var syntheticInvalidation: (@Sendable () -> Void)?
     init(_ steps: [Step]) { self.steps = steps }
     var requests: [URLRequest] { lock.lock(); defer { lock.unlock() }; return recorded }
     private func consume(_ request: URLRequest) throws -> Step {
@@ -58,8 +62,11 @@ public final class FakeSession: @unchecked Sendable {
         return steps.removeFirst()
     }
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        if let syntheticForward { return try await syntheticForward(request) }
         let step = try consume(request)
         await step.entered?.signal(); await step.release?.wait()
+        if let delay = step.delayNanoseconds { try await Task.sleep(nanoseconds: delay) }
+        step.onResponse?()
         if let error = step.error { throw error }
         let url = step.finalURL ?? request.url!
         if step.nonHTTP { return (step.body, URLResponse(url: url, mimeType: step.mime, expectedContentLength: step.body.count, textEncodingName: nil)) }
@@ -131,3 +138,17 @@ final class LoginDiagnosticTrace: @unchecked Sendable {
     func begin(_ stage: LoginDiagnosticStage) -> LoginDiagnosticSpan { LoginDiagnosticSpan() }
     func skip(_ stage: LoginDiagnosticStage, reason: LoginDiagnosticReason) {}
 }
+
+// BEGIN ILOADER NIL-CONTEXT DOUBLE
+// Legacy fixture executes full candidate Authentication.swift with this context nil.
+// Its unreachable members fail closed instead of silently simulating opt-in success.
+public enum ILoaderRemoteError: Error { case consentRequired, resyncUnavailable, httpStatus(Int), invalidResponse, invalidState }
+public enum ILoaderRemoteAuthentication {
+    @TaskLocal public static var current: ILoaderRemoteAuthenticationContext?
+}
+public final class ILoaderRemoteAuthenticationContext: @unchecked Sendable {
+    public let session = FakeSession([])
+    public func fetch() async throws -> AnisetteData { throw FixtureFailure.unscripted }
+    public func resynchronize(sim: String) async throws -> AnisetteData { throw FixtureFailure.unscripted }
+}
+// END ILOADER NIL-CONTEXT DOUBLE

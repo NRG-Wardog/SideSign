@@ -8,6 +8,17 @@ ROOT=HERE.parents[1]
 BASE=HERE/'baseline/Authentication.swift'
 AUTH=ROOT/'Sources/DeveloperPortal/Authentication.swift'
 MODEL=ROOT/'Sources/Models/AuthenticationDiagnosticTrace.swift'
+def legacy_authentication(source):
+ # New opt-in behavior is reversible independently of the original diagnostic
+ # instrumentation. Runtime equivalence still executes the full, unprojected
+ # candidate with ILoaderRemoteAuthentication.current == nil.
+ projection = HERE.parent/'iloader-auth-parity/authentication-projection.json'
+ if projection.exists():
+  for old,new,count in reversed(json.loads(projection.read_text())):
+   assert source.count(new)==count, 'Opt-in reverse projection mismatch: '+new[:100]
+   source=source.replace(new,old)
+ return source
+
 def balanced(source):
  stack=[]; i=0
  while i<len(source):
@@ -36,12 +47,12 @@ class SourceTests(unittest.TestCase):
   self.assertEqual(manifest['commit'],'9757970d656135f0b21dc00700507d099f170320')
   self.assertEqual(generate.digest(BASE),manifest['sha256'])
  def test_exact_reverse_projection(self):
-  s=AUTH.read_text()
+  s=legacy_authentication(AUTH.read_text())
   for old,new,count in reversed(json.loads((HERE/'instrumentation-projection.json').read_text())):
    self.assertEqual(s.count(new),count,new[:100]);s=s.replace(new,old)
   self.assertEqual(s,BASE.read_text())
  def test_original_throws_and_transport(self):
-  original=BASE.read_text();candidate=AUTH.read_text()
+  original=BASE.read_text();candidate=legacy_authentication(AUTH.read_text())
   throws=lambda s:[x.strip() for x in s.splitlines() if x.strip().startswith('throw ')]
   self.assertEqual(len(throws(original)),48);self.assertEqual(throws(original),throws(candidate))
   self.assertEqual(candidate.count('session.data(for:'),5)
@@ -73,6 +84,10 @@ class SourceTests(unittest.TestCase):
    generated=(out/'CandidateAuthentication.swift').read_text()
    self.assertIn(generate.clean(AUTH.read_text()),generated)
    self.assertIn('public final class FakeSession',(out/'BoundaryDoubles.swift').read_text())
+   boundary=(out/'BoundaryDoubles.swift').read_text()
+   self.assertIn('// BEGIN ILOADER NIL-CONTEXT DOUBLE',boundary)
+   self.assertIn('public enum ILoaderRemoteError: Error',boundary)
+   self.assertIn('case consentRequired, resyncUnavailable, httpStatus(Int), invalidResponse, invalidState',boundary)
    for name in evidence['outputs']:
     balanced((out/name).read_text());self.assertEqual(evidence['outputs'][name],generate.digest(out/name))
    self.assertIn('public struct AuthenticationHeaderProvenance',(out/'Types.swift').read_text())
