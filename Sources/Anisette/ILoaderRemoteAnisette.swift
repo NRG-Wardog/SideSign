@@ -1,5 +1,5 @@
 // Opt-in RemoteV3 adaptation of isideload 0.5.0 (fc7a81a6).
-// This identity lives only for the approved attempt. No native ADI or persistent store is used.
+// Request contexts are revocable. The host separately owns approved reusable provider identity storage.
 import Foundation
 import Crypto
 import AnisetteKit
@@ -50,6 +50,8 @@ public final class ILoaderRemoteAuthenticationContext: @unchecked Sendable {
     private let fetcher: @Sendable (String?) async throws -> AnisetteData
     private let canceller: @Sendable () -> Void
     private let now: @Sendable () -> Date
+    private let isAuthorized: @Sendable () -> Bool
+    private let stateSnapshot: (@Sendable () async throws -> ILoaderRemoteState)?
     private let lock = NSLock()
     private var invalidated = false
     private var didResynchronize = false
@@ -58,8 +60,11 @@ public final class ILoaderRemoteAuthenticationContext: @unchecked Sendable {
     public init(endpoint: ILoaderRemoteEndpoint = .macJkcoxson,
                 canceller: @escaping @Sendable () -> Void = {},
                 now: @escaping @Sendable () -> Date = { Date() },
+                isAuthorized: @escaping @Sendable () -> Bool = { true },
+                stateSnapshot: (@Sendable () async throws -> ILoaderRemoteState)? = nil,
                 fetcher: @escaping @Sendable (String?) async throws -> AnisetteData) {
         self.endpoint = endpoint; self.canceller = canceller; self.fetcher = fetcher; self.now = now
+        self.isAuthorized = isAuthorized; self.stateSnapshot = stateSnapshot
         self.session = ILoaderRemoteTransport.makeSession()
     }
     deinit { session.invalidateAndCancel() }
@@ -70,13 +75,25 @@ public final class ILoaderRemoteAuthenticationContext: @unchecked Sendable {
         }
         if cancel { session.invalidateAndCancel(); canceller() }
     }
+    public func checkActive() throws {
+        try Task.checkCancellation()
+        guard isAuthorized() else { throw ILoaderRemoteError.consentRequired }
+        try lock.withLock { guard !invalidated else { throw ILoaderRemoteError.consentRequired } }
+    }
+    public func identityState() async throws -> ILoaderRemoteState {
+        try checkActive()
+        guard let stateSnapshot else { throw ILoaderRemoteError.invalidState }
+        let state = try await stateSnapshot()
+        try checkActive()
+        return state
+    }
     public func fetch() async throws -> AnisetteData { try await acquire(sim: nil) }
     public func resynchronize(sim: String) async throws -> AnisetteData {
         guard !sim.isEmpty, sim.utf8.count <= 1_048_576 else { throw ILoaderRemoteError.resyncUnavailable }
         return try await acquire(sim: sim)
     }
     private func acquire(sim: String?) async throws -> AnisetteData {
-        try Task.checkCancellation()
+        try checkActive()
         let cache: (data: AnisetteData, age: TimeInterval)? = try lock.withLock {
             guard !invalidated else { throw ILoaderRemoteError.consentRequired }
             guard !fetching else { throw ILoaderRemoteError.stateChanged }
@@ -100,13 +117,12 @@ public final class ILoaderRemoteAuthenticationContext: @unchecked Sendable {
                 adapter: .remote, librarySelection: .remote, libraryValidation: .notObserved,
                 requestedBlobInput: context.generationBlobInput)
             _ = AuthenticationDiagnosticTrace.current?.beginProviderObservation(observation)
-            try Task.checkCancellation()
-            try lock.withLock { guard !invalidated else { throw ILoaderRemoteError.consentRequired } }
+            try checkActive()
             return data
         }
         defer { lock.withLock { fetching = false } }
         let result = try await fetcher(sim)
-        try Task.checkCancellation()
+        try checkActive()
         try lock.withLock {
             guard !invalidated else { throw ILoaderRemoteError.consentRequired }
             cached = (result, now())
@@ -137,7 +153,9 @@ public struct ILoaderRemoteProfile: Sendable, Equatable {
     public let userAgent: String
 }
 
-public struct ILoaderRemoteState: Sendable, Equatable {
+public struct ILoaderRemoteState: Sendable, Equatable, CustomStringConvertible, CustomDebugStringConvertible {
+    public var description: String { "Remote anisette state (redacted)" }
+    public var debugDescription: String { description }
     public let profile: ILoaderRemoteProfile
     public let identity: Data
     /// Canonical base64 wire representation, not a local native ADI blob.
@@ -147,7 +165,12 @@ public struct ILoaderRemoteState: Sendable, Equatable {
         self.identity = Data((0..<16).map { _ in UInt8.random(in: .min ... .max) })
         self.adiPB = nil
     }
-    // Owned synthetic fixture initializer; production identity still comes from secure platform RNG.
+    public init(restoring profile: ILoaderRemoteProfile, identity: Data, adiPB: String) throws {
+        self.profile = profile; self.identity = identity
+        self.adiPB = try Self.validatedBlob(adiPB)
+        try validated(for: profile)
+    }
+    // Owned synthetic fixture initializer; new production identities use the platform RNG.
     init(profile: ILoaderRemoteProfile, identity: Data, adiPB: String?) {
         self.profile = profile; self.identity = identity; self.adiPB = adiPB
     }
@@ -241,9 +264,10 @@ public actor ILoaderRemoteAnisetteClient {
         guard state.profile.endpoint == endpoint else { throw ILoaderRemoteError.invalidState }
         try state.validated(for: state.profile)
         guard sim == nil || state.adiPB != nil else { throw ILoaderRemoteError.resyncUnavailable }
-        // Official RemoteV3 reads client_info for each acquisition. Fail closed on a changed profile.
+        // Read and validate the same endpoint's current Mac profile on each acquisition.
+        // A compatible advertised version change must not rotate or strand the saved identity.
         let profile = try await fetchProfile()
-        guard profile == state.profile else { throw ILoaderRemoteError.stateChanged }
+        guard profile.endpoint == state.profile.endpoint else { throw ILoaderRemoteError.stateChanged }
         let observation = AuthenticationProviderObservation(mode: .remote,
             requestedClientInfoSource: .provider, requestedClientInfoFamily: .classify(profile.clientInfo),
             requestedBlobInput: state.adiPB == nil ? .absent : .present)
@@ -251,9 +275,10 @@ public actor ILoaderRemoteAnisetteClient {
         let token = trace?.beginProviderObservation(observation)
         if let token { trace?.setProviderObservation(observation.observing(.clientReady,
             adapter: .remote, library: .remote, validation: .notObserved), token: token) }
-        var updated = state
+        var updated = ILoaderRemoteState(profile: profile, identity: state.identity, adiPB: state.adiPB)
         if updated.adiPB == nil {
-            updated.adiPB = try await withILoaderDiagnosticStage(.provisioning) { try await provision(state: state) }
+            let provisioningState = updated
+            updated.adiPB = try await withILoaderDiagnosticStage(.provisioning) { try await provision(state: provisioningState) }
         } else { LoginDiagnosticTrace.current?.skip(.provisioning, reason: .cached) }
         var request = URLRequest(url: endpoint.url.appendingPathComponent("v3/get_headers"))
         request.httpMethod = "POST"

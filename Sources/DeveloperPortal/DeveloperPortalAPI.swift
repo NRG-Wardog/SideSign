@@ -366,7 +366,9 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await session.data(for: request)
+            let scopedRemote = ILoaderRemoteAuthentication.current
+            try scopedRemote?.checkActive()
+            (data, response) = try await (scopedRemote?.session ?? session).data(for: request)
         } catch {
             throw error
         }
@@ -465,7 +467,9 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
 
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await session.data(for: request)
+            let scopedRemote = ILoaderRemoteAuthentication.current
+            try scopedRemote?.checkActive()
+            (data, response) = try await (scopedRemote?.session ?? session).data(for: request)
         } catch {
             throw error
         }
