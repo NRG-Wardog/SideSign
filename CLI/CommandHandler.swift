@@ -650,6 +650,8 @@ public enum CommandHandler {
                     print("Generating Anisette data using local ADI libraries (\(dir.path))...")
                 case .remoteODA(let src, _):
                     print("Fetching On-Device Anisette package from \(src.absoluteString)...")
+                case .verifiedAppleMusic:
+                    print("Generating Anisette data using verified Apple Music libraries...")
                 }
                 if enableFailover {
                     print("Fetching Anisette data with auto-failover across \(failoverURLs.count) servers (start index: \(startIndex))...")
