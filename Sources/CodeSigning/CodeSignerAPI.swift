@@ -60,7 +60,44 @@ public struct AppBundleSigner: CodeSignerAPI, Sendable {
         self.keyStore = keyStore
     }
 
+    /// Build the exact entitlement map used for signing the main application.
+    /// Provisioning preflight must call this same boundary, not compare against
+    /// the unfiltered profile and then make a different decision at signing.
+    public static func signingEntitlements(profile: ProvisioningProfile,
+                                           applicationEntitlements: [String: any Sendable]) throws -> [String: any Sendable] {
+        var filteredEntitlements = profile.entitlements
+        for (key, _) in filteredEntitlements {
+            if let applicationValue = applicationEntitlements[key] {
+                if key == "keychain-access-groups" {
+                    guard let groups = applicationValue as? [String] else { continue }
+                    filteredEntitlements[key] = try groups.map { group in
+                        guard let separator = group.firstIndex(of: ".") else {
+                            throw SignerError.invalidApp(cause: "A keychain access group is missing its team prefix.")
+                        }
+                        return profile.teamIdentifier + group[separator...]
+                    }
+                }
+            } else if key != "application-identifier" && key != "com.apple.developer.team-identifier" && key != "get-task-allow" {
+                filteredEntitlements.removeValue(forKey: key)
+            }
+        }
+        return filteredEntitlements
+    }
+
     public func signApp(at appURL: URL, provisioningProfiles profiles: [ProvisioningProfile], progress: Progress? = nil) async throws
+    {
+        _ = try await signApp(at: appURL, provisioningProfiles: profiles,
+                              extensionStrategy: .perExtension, progress: progress)
+    }
+
+    /// Opt-in experiment. Fallback extensions require their own matching profile;
+    /// they never silently inherit the main profile or lose capabilities.
+    @discardableResult
+    public func signApp(at appURL: URL, provisioningProfiles profiles: [ProvisioningProfile],
+                        extensionStrategy: ExtensionSigningStrategy,
+                        originalExtensionBundleIdentifiers: [String: String] = [:],
+                        previouslyReusedExtensionIdentifiers: Set<String> = [],
+                        progress: Progress? = nil) async throws -> [ExtensionSigningDecision]
     {
         debugLog("[SideSign] AppBundleSigner.signApp called")
         verboseLog("[SideSign] URL: \(appURL.path), Profiles: \(profiles.map { "\($0.name) (\($0.bundleIdentifier))" })")
@@ -83,43 +120,53 @@ public struct AppBundleSigner: CodeSignerAPI, Sendable {
 
         var entitlementsByURL: [URL: String] = [:]
 
-        func prepare(_ app: AppBundle) throws {
+        var decisions = [ExtensionSigningDecision]()
+        var mainSigningEntitlements: [String: any Sendable] = [:]
+        let mainProfile = profiles.first { $0.bundleIdentifier == appBundle.bundleIdentifier }
+
+        func prepare(_ app: AppBundle, reuseMain: Bool = false) throws {
             verboseLog("[SideSign] AppBundleSigner.prepare started for: \(app.bundleIdentifier)")
 
-            guard let matchedProfile = profile(for: app) else {
+            let selectedProfile: ProvisioningProfile?
+            if extensionStrategy != .perExtension {
+                selectedProfile = reuseMain ? mainProfile : profiles.first { $0.bundleIdentifier == app.bundleIdentifier }
+            } else {
+                selectedProfile = profile(for: app)
+            }
+            guard let matchedProfile = selectedProfile else {
                 debugLog("[SideSign] AppBundleSigner.prepare error: Missing provisioning profile")
                 verboseLog("[SideSign] BundleID: \(app.bundleIdentifier)")
                 throw SignerError.missingProvisioningProfile(bundleIdentifier: app.bundleIdentifier)
             }
 
-            var filteredEntitlements = matchedProfile.entitlements
-            verboseLog("[SideSign] Original profile entitlements: \(filteredEntitlements)")
-
-            let applicationEntitlements = app.entitlements
-
-            for (key, _) in filteredEntitlements {
-                if let applicationValue = applicationEntitlements[key] {
-                    if key == "keychain-access-groups" {
-                        guard let groups = applicationValue as? [String] else {
-                            verboseLog("[SideSign] The app's keychain-access-groups entitlement is not an array of strings.")
-                            continue
-                        }
-
-                        filteredEntitlements[key] = try groups.map { group in
-                            guard let separator = group.firstIndex(of: ".") else {
-                                debugLog("[SideSign] The keychain access group does not contain a Team ID prefix")
-                                verboseLog("[SideSign] Group: '\(group)'")
-                                throw SignerError.invalidApp(cause: "The keychain access group '\(group)' does not contain a Team ID prefix.")
-                            }
-                            return matchedProfile.teamIdentifier + group[separator...]
-                        }
-                    }
-                } else if key != "application-identifier"               &&
-                          key != "com.apple.developer.team-identifier"  &&
-                          key != "get-task-allow" 
-                {
-                    filteredEntitlements.removeValue(forKey: key)
+            if extensionStrategy != .perExtension {
+                guard !team.identifier.isEmpty,
+                      matchedProfile.teamIdentifier == team.identifier,
+                      matchedProfile.entitlements["com.apple.developer.team-identifier"] as? String == team.identifier,
+                      matchedProfile.entitlements["application-identifier"] as? String == team.identifier + "." + matchedProfile.bundleIdentifier,
+                      keyStore.certificate.organizationalUnit == team.identifier,
+                      let signingDER = keyStore.certificate.data, !signingDER.isEmpty,
+                      matchedProfile.certificates.contains(where: { $0.data == signingDER }),
+                      matchedProfile.expirationDate > Date() else {
+                    throw SignerError.invalidApp(cause: "The selected signing profile and certificate do not match the active team, or the profile has expired.")
                 }
+            }
+
+            var filteredEntitlements = try Self.signingEntitlements(
+                profile: matchedProfile, applicationEntitlements: app.entitlements)
+
+            if reuseMain {
+                // Reuse the exact main signing entitlement map, not a second
+                // extension-specific filtering of the same profile.
+                filteredEntitlements = mainSigningEntitlements
+            } else if app.fileURL == appBundle.fileURL {
+                mainSigningEntitlements = filteredEntitlements
+            }
+
+            if extensionStrategy != .perExtension,
+               !ExtensionSigningPolicy.requiredCapabilitiesPreserved(required: app.entitlements,
+                    signed: filteredEntitlements, teamIdentifier: matchedProfile.teamIdentifier) {
+                throw SignerError.invalidApp(cause: "The selected profile cannot preserve all required app or extension capabilities.")
             }
 
             verboseLog("[SideSign] Filtered entitlements for signing: \(filteredEntitlements)")
@@ -148,7 +195,20 @@ public struct AppBundleSigner: CodeSignerAPI, Sendable {
 
             for ext in appBundle.appExtensions {
                 verboseLog("[SideSign] Found app extension: \(ext.bundleIdentifier) at \(ext.fileURL.path)")
-                try prepare(ext)
+                var decision = ExtensionSigningPolicy.evaluate(
+                    strategy: extensionStrategy,
+                    mainBundleIdentifier: appBundle.bundleIdentifier,
+                    extensionBundleIdentifier: ext.bundleIdentifier,
+                    mainEntitlements: mainSigningEntitlements,
+                    extensionEntitlements: ext.entitlements,
+                    originalExtensionBundleIdentifier: originalExtensionBundleIdentifiers[ext.bundleIdentifier],
+                    allowPreviouslyReusedMainIdentity: previouslyReusedExtensionIdentifiers.contains(ext.bundleIdentifier))
+                if decision.reuseMain, (mainProfile?.expirationDate ?? .distantPast) <= Date() {
+                    decision = .init(bundleIdentifier: ext.bundleIdentifier, reuseMain: false,
+                                     reasons: ["mainProfileExpired"])
+                }
+                decisions.append(decision)
+                try prepare(ext, reuseMain: decision.reuseMain)
             }
 
             let keyData = try keyStore.exportP12()
@@ -215,6 +275,7 @@ public struct AppBundleSigner: CodeSignerAPI, Sendable {
 
             debugLog("[SideSign] AppBundleSigner.signApp completed successfully")
             verboseLog("[SideSign] App URL: \(appURL.path)")
+            return decisions
         } catch {
             debugLog("[SideSign] AppBundleSigner.signApp failed with error: \(error)")
             throw error
