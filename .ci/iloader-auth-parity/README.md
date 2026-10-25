@@ -18,3 +18,21 @@ Compile exactly the seven files listed in `source-evidence.json` → `output_clo
 All Apple/provider HTTP and websocket boundaries are in-memory scripted doubles. The entire production Authentication.swift extension and production ILoader context/policy bodies are retained; only unavailable imports and transport/native-crypto boundaries are replaced. Request/body/header expectations are independent literal values tied to reviewed official source. No credentials, real provider data, native library, network, or Apple service are used. Synthetic crypto is not cryptographic validation, and a pass does not demonstrate Apple acceptance.
 
 Coverage includes full parsed body dictionaries and primitive types, exact complete header maps, the distinct URL-bag profile, metadata/header acquisition and endpoint boundaries, strict 60 whole-second cache TTL, current acquisition at 2FA/app-token stages, one status-434 init resync using the same A2k and original complete CPD, and negative cases for fallback and special -80045 retry. Existing diagnostic runtime tests separately prove nil-context request bytes/headers/results/errors remain equivalent to the original baseline.
+
+
+## Bounded HTTP collector coverage
+
+The same seven-file closure also includes the complete production
+`ILoaderRemoteHTTPTransport.swift` body. Its Foundation session, task, delegate
+and challenge types are replaced by dedicated in-memory callback boundaries.
+Existing authentication vectors are unchanged. Parked task callbacks exercise
+2xx compatibility, exact-cap success, chunk overflow before append, declared
+oversize, changed response URLs, redirects, HTTP-auth refusal, platform TLS
+handling, cancellation and late callbacks. The owner's actual registry is tested
+for in-flight cancellation and permanent invalidation. No real session or task is
+constructed. Source receipts include the new production transport file.
+
+This only hardens provider/provisioning HTTP; GrandSlam/2FA transport, WebSocket,
+Mac identity/profile and authentication policy are unchanged. Generated fixtures
+are not production-platform networking integration tests or proof of live Apple
+acceptance. Run the existing normal build/CI gates too.

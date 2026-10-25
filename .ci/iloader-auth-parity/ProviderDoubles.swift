@@ -4,6 +4,7 @@
 final class FakeSessionConfiguration: @unchecked Sendable {
     static var ephemeral: FakeSessionConfiguration { FakeSessionConfiguration() }
     var urlCache: Any?
+    var urlCredentialStorage: Any?
     var httpCookieStorage: Any?
     var httpShouldSetCookies = true
     var requestCachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
@@ -104,3 +105,75 @@ typealias ALTAnisetteData = AnisetteData
 enum AnisetteError: Error { case providerNotReady(String), invalidAnisetteData }
 func withLoginDiagnosticStage<T>(_ stage: LoginDiagnosticStage, _ operation: () async throws -> T) async rethrows -> T { try await operation() }
 func v3LoginStage<T>(_ stage: LoginDiagnosticStage, _ operation: () async throws -> T) async rethrows -> T { try await operation() }
+
+// The bounded HTTP collector's Foundation boundary only. Production accumulation,
+// response validation, cancellation and terminal arbitration are not reimplemented.
+protocol FakeBoundedHTTPDataDelegate: AnyObject, Sendable {
+    func urlSession(_ session: FakeBoundedHTTPSession, dataTask: FakeBoundedHTTPTask, didReceive response: URLResponse,
+                    completionHandler: @escaping @Sendable (FakeBoundedHTTPSession.ResponseDisposition) -> Void)
+    func urlSession(_ session: FakeBoundedHTTPSession, dataTask: FakeBoundedHTTPTask, didReceive data: Data)
+    func urlSession(_ session: FakeBoundedHTTPSession, task: FakeBoundedHTTPTask, didCompleteWithError error: Error?)
+}
+struct FakeHTTPProtectionSpace: Sendable { let authenticationMethod: String }
+struct FakeHTTPAuthenticationChallenge: Sendable { let protectionSpace: FakeHTTPProtectionSpace }
+final class HTTPFixtureBox<T>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: T
+    init(_ value: T) { stored = value }
+    var value: T { lock.withLock { stored } }
+    func set(_ value: T) { lock.withLock { stored = value } }
+}
+final class FakeBoundedHTTPSession: @unchecked Sendable {
+    enum ResponseDisposition { case allow, cancel }
+    enum AuthChallengeDisposition { case performDefaultHandling, cancelAuthenticationChallenge }
+    let delegate: any FakeBoundedHTTPDataDelegate
+    let script: TransportScript?
+    private let lock = NSLock()
+    private var tasks: [FakeBoundedHTTPTask] = []
+    init(configuration: FakeSessionConfiguration, delegate: any FakeBoundedHTTPDataDelegate, delegateQueue: OperationQueue?) {
+        self.delegate = delegate
+        script = SyntheticTransport.current
+        script?.configured(configuration)
+    }
+    func dataTask(with request: URLRequest) -> FakeBoundedHTTPTask {
+        let task = FakeBoundedHTTPTask(session: self, request: request)
+        lock.withLock { tasks.append(task) }
+        return task
+    }
+    func invalidateAndCancel() {
+        let pending = lock.withLock { let pending = tasks; tasks.removeAll(); return pending }
+        // HTTP task completion must not cancel another session's WebSocket.
+        for task in pending { task.cancel() }
+    }
+}
+final class FakeBoundedHTTPTask: @unchecked Sendable {
+    let session: FakeBoundedHTTPSession
+    let request: URLRequest
+    private let lock = NSLock()
+    private var work: Task<Void, Never>?
+    private var cancelled = false
+    init(session: FakeBoundedHTTPSession, request: URLRequest) { self.session = session; self.request = request }
+    func resume() {
+        guard !lock.withLock({ cancelled }) else { return }
+        let work = Task {
+            do {
+                try Task.checkCancellation()
+                guard let script = self.session.script else { throw FixtureFailure.unscripted }
+                let (data, response) = try await script.http.data(for: self.request)
+                try Task.checkCancellation()
+                let disposition = HTTPFixtureBox<FakeBoundedHTTPSession.ResponseDisposition?>(nil)
+                self.session.delegate.urlSession(self.session, dataTask: self, didReceive: response) { disposition.set($0) }
+                guard disposition.value == .allow else { return }
+                self.session.delegate.urlSession(self.session, dataTask: self, didReceive: data)
+                self.session.delegate.urlSession(self.session, task: self, didCompleteWithError: nil)
+            } catch {
+                self.session.delegate.urlSession(self.session, task: self, didCompleteWithError: error)
+            }
+        }
+        lock.withLock { if cancelled { work.cancel() } else { self.work = work } }
+    }
+    func cancel() {
+        let work = lock.withLock { cancelled = true; let value = self.work; self.work = nil; return value }
+        work?.cancel()
+    }
+}

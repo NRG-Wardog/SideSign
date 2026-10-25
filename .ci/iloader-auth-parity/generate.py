@@ -19,6 +19,18 @@ def load_legacy():
     spec.loader.exec_module(module)
     return module
 
+def clean_http_transport(source):
+    # Only Foundation transport types are replaced; every production collector body stays exact.
+    replacements = [('URLSessionDataDelegate', 'FakeBoundedHTTPDataDelegate'),
+                    ('URLSessionConfiguration', 'FakeSessionConfiguration'),
+                    ('URLSessionDataTask', 'FakeBoundedHTTPTask'),
+                    ('URLSessionTask', 'FakeBoundedHTTPTask'),
+                    ('URLSession', 'FakeBoundedHTTPSession'),
+                    ('URLAuthenticationChallenge', 'FakeHTTPAuthenticationChallenge')]
+    for old, new in replacements:
+        source = re.sub(r'\b' + old + r'\b', new, source)
+    return source
+
 def generate(output, sidestore_root=None):
     output.mkdir(parents=True, exist_ok=True)
     old = load_legacy()
@@ -44,6 +56,8 @@ def generate(output, sidestore_root=None):
     context = re.sub(r'\bURLSessionTaskDelegate\b', 'FakeSessionTaskDelegate', context)
     context = re.sub(r'\bURLSessionTask\b', 'FakeSessionTask', context)
     content['ILoaderRemoteAnisette.swift'] = '#if canImport(FoundationNetworking)\nimport FoundationNetworking\n#endif\n' + context
+    http_path = ROOT / 'Sources/Anisette/ILoaderRemoteHTTPTransport.swift'
+    content['ILoaderRemoteAnisette.swift'] += '\n' + clean_http_transport(http_path.read_text())
     content['BoundaryDoubles.swift'] += '\n' + (HERE / 'ProviderDoubles.swift').read_text()
     content['RuntimeTests.swift'] = (HERE / 'RuntimeTests.swift').read_text()
     content['CandidateAuthentication.swift'] += '\n' + (HERE / 'PrivateProbes.swift').read_text()
@@ -71,6 +85,7 @@ def generate(output, sidestore_root=None):
     assert set(content) == set(OUTPUTS)
     inputs = dict(legacy_evidence['inputs'])
     inputs[str(context_path.relative_to(ROOT))] = digest(context_path)
+    inputs[str(http_path.relative_to(ROOT))] = digest(http_path)
     inputs['SideStore/SideStore/Core/Anisette/AnisetteProvider.swift'] = digest(factory_path)
     inputs['SideStore/AltStore/Core/Components/Keychain.swift'] = digest(keychain_path)
     for path in HERE.rglob('*'):
@@ -83,7 +98,7 @@ def generate(output, sidestore_root=None):
         'inputs': inputs,
         'outputs': {name: digest(output / name) for name in OUTPUTS},
         'output_closure': list(OUTPUTS),
-        'boundary_replacements': ['URLSession -> FakeSession', 'URLSessionWebSocketTask -> FakeWebSocketTask', 'URLSessionConfiguration -> FakeSessionConfiguration', 'URLSessionTaskDelegate -> FakeSessionTaskDelegate', 'URLSessionTask -> FakeSessionTask', 'synthetic crypto', 'inert empty identity store/account environment and manual-registry boundary; real persistence and leases covered by remote-identity-reuse', 'same-file private remote probe supplies a verified synthetic phone'],
+        'boundary_replacements': ['URLSession -> FakeSession', 'URLSessionWebSocketTask -> FakeWebSocketTask', 'URLSessionConfiguration -> FakeSessionConfiguration', 'URLSessionTaskDelegate -> FakeSessionTaskDelegate', 'URLSessionTask -> FakeSessionTask', 'bounded HTTP Foundation delegate/task -> in-memory callback boundaries', 'synthetic crypto', 'inert empty identity store/account environment and manual-registry boundary; real persistence and leases covered by remote-identity-reuse', 'same-file private remote probe supplies a verified synthetic phone'],
         'network': False, 'native_provider': False, 'swift_executed': False,
     }
     (output / 'source-evidence.json').write_text(json.dumps(evidence, indent=2) + '\n')

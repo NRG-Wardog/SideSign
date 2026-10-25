@@ -207,13 +207,17 @@ public struct ILoaderRemoteState: Sendable, Equatable, CustomStringConvertible, 
 public actor ILoaderRemoteAnisetteClient {
     public let endpoint: ILoaderRemoteEndpoint
     private nonisolated let session = ILoaderRemoteTransport.makeSession()
+    private nonisolated let httpTransport = ILoaderRemoteHTTPTransport()
     private nonisolated let acquisitionTimeoutNanoseconds: UInt64
     public init(endpoint: ILoaderRemoteEndpoint = .macJkcoxson, acquisitionTimeoutNanoseconds: UInt64 = 60_000_000_000) {
         self.endpoint = endpoint
         self.acquisitionTimeoutNanoseconds = min(acquisitionTimeoutNanoseconds, 60_000_000_000)
     }
-    deinit { session.invalidateAndCancel() }
-    public nonisolated func invalidate() { session.invalidateAndCancel() }
+    deinit { httpTransport.invalidate(); session.invalidateAndCancel() }
+    public nonisolated func invalidate() {
+        httpTransport.invalidate()
+        session.invalidateAndCancel()
+    }
 
     public func fetchProfile() async throws -> ILoaderRemoteProfile {
         try Task.checkCancellation()
@@ -391,12 +395,7 @@ public actor ILoaderRemoteAnisetteClient {
     }
     private func requestData(_ request: URLRequest) async throws -> Data {
         try Task.checkCancellation()
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw ILoaderRemoteError.httpStatus((response as? HTTPURLResponse)?.statusCode ?? -1)
-        }
-        guard data.count <= 1_048_576 else { throw ILoaderRemoteError.invalidResponse }
-        return data
+        return try await httpTransport.data(for: request, maximumBytes: 1_048_576)
     }
     private nonisolated static func send(_ dictionary: [String: String], to socket: URLSessionWebSocketTask) async throws {
         try Task.checkCancellation()

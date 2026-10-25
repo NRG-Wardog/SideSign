@@ -470,6 +470,7 @@ struct Export: Encodable {
         try await testTrustedVerification(&rows); try testSMSClassifier(&rows)
         try await testDiagnosticBoundaries(&rows)
         try await testTimeoutAndLateCancellation(&rows)
+        try await testBoundedHTTPTransport(&rows)
         try expect(Set(rows).count == rows.count && !rows.isEmpty,"unique executed case labels")
         if CommandLine.arguments.count > 1 {
             try JSONEncoder().encode(Export(cases:rows)).write(to:URL(fileURLWithPath:CommandLine.arguments[1]))
@@ -544,4 +545,160 @@ func testDiagnosticBoundaries(_ rows: inout [String]) async throws {
     try assertActualSnapshot(trace,requireRequest:false)
     try expect(trace.snapshot().requestTrace == nil,"pre-request provider failure has no fabricated request")
     rows.append("actual-collector-provider-failure-before-2fa-request")
+}
+
+// Runs the source-derived HTTP collector, not a second accumulation algorithm.
+// Only Foundation session/tasks are synthetic, and parked tasks never resume.
+func parkedHTTP(maximum: Int = 4,
+                _ drive: (ILoaderRemoteHTTPTask, FakeBoundedHTTPTask) throws -> Void) async throws -> Data {
+    let parked = HTTPFixtureBox<FakeBoundedHTTPTask?>(nil)
+    var request = URLRequest(url: URL(string:"https://mac-ani.jkcoxson.com/v3/client_info")!)
+    request.httpMethod = "POST"
+    request.httpBody = Data("synthetic-request".utf8)
+    request.setValue("application/json", forHTTPHeaderField:"Content-Type")
+    let collector = ILoaderRemoteHTTPTask(request:request,maximumBytes:maximum,startTask:{ parked.set($0) })
+    let operation = Task { try await collector.run() }
+    defer { operation.cancel() }
+    for _ in 0..<1000 {
+        if parked.value != nil { break }
+        try await Task.sleep(nanoseconds:1_000_000)
+    }
+    guard let task = parked.value else { throw FixtureFailure.assertion("parked HTTP collector did not start") }
+    try expect(task.request.url == request.url && task.request.httpMethod == request.httpMethod &&
+        task.request.httpBody == request.httpBody && task.request.allHTTPHeaderFields == request.allHTTPHeaderFields,
+        "bounded collector preserves request URL, method, body and explicit headers")
+    try drive(collector,task)
+    return try await operation.value
+}
+func boundedResponse(_ task: FakeBoundedHTTPTask, status: Int = 200, length: Int? = nil, changedURL: Bool = false) -> HTTPURLResponse {
+    HTTPURLResponse(url:changedURL ? URL(string:"https://other.invalid/")! : task.request.url!,
+        statusCode:status,httpVersion:"HTTP/1.1",headerFields:length.map{["Content-Length":String($0)]})!
+}
+func acceptBoundedResponse(_ collector: ILoaderRemoteHTTPTask, _ task: FakeBoundedHTTPTask,
+                           status: Int = 200, length: Int? = nil, changedURL: Bool = false) -> FakeBoundedHTTPSession.ResponseDisposition? {
+    let decision = HTTPFixtureBox<FakeBoundedHTTPSession.ResponseDisposition?>(nil)
+    collector.urlSession(task.session,dataTask:task,didReceive:boundedResponse(task,status:status,length:length,changedURL:changedURL)) { decision.set($0) }
+    return decision.value
+}
+func expectHTTPFailure(_ label: String, matches: (Error) -> Bool, _ body: () async throws -> Void) async throws {
+    do { try await body(); throw FixtureFailure.assertion("expected HTTP failure: "+label) }
+    catch let error as FixtureFailure { throw error }
+    catch { try expect(matches(error),"exact bounded HTTP error category: "+label) }
+}
+func isInvalidHTTPResponse(_ error: Error) -> Bool {
+    if case ILoaderRemoteError.invalidResponse = error { return true }; return false
+}
+func testBoundedHTTPTransport(_ rows: inout [String]) async throws {
+    let configuration = ILoaderRemoteHTTPTask.configuration()
+    try expect(configuration.urlCache == nil && configuration.urlCredentialStorage == nil &&
+        configuration.httpCookieStorage == nil && !configuration.httpShouldSetCookies,
+        "bounded collector has no credential/cookie/cache stores")
+    try expect(configuration.timeoutIntervalForRequest == 30 && configuration.timeoutIntervalForResource == 60,
+        "bounded collector retains request and resource timeouts")
+    for status in [200,204,206] {
+        let value = try await parkedHTTP { collector,task in
+            try expect(acceptBoundedResponse(collector,task,status:status,length:4) == .allow,"all successful 2xx accepted")
+            collector.urlSession(task.session,dataTask:task,didReceive:Data([1,2]))
+            collector.urlSession(task.session,dataTask:task,didReceive:Data([3,4]))
+            collector.urlSession(task.session,task:task,didCompleteWithError:nil)
+        }
+        try expect(value == Data([1,2,3,4]),"exact cap accepts and preserves chunk order")
+    }
+    rows.append("bounded-http-2xx-exact-cap-request-and-session-policy")
+    try await expectHTTPFailure("streamed overflow",matches:isInvalidHTTPResponse) {
+        _ = try await parkedHTTP { collector,task in
+            try expect(acceptBoundedResponse(collector,task) == .allow,"unknown length allowed before streaming")
+            collector.urlSession(task.session,dataTask:task,didReceive:Data([1,2,3]))
+            collector.urlSession(task.session,dataTask:task,didReceive:Data([4,5]))
+            collector.urlSession(task.session,task:task,didCompleteWithError:nil)
+            collector.urlSession(task.session,dataTask:task,didReceive:Data([6]))
+        }
+    }
+    for changedURL in [false,true] {
+        try await expectHTTPFailure("advertised overflow or changed URL",matches:isInvalidHTTPResponse) {
+            _ = try await parkedHTTP { collector,task in
+                try expect(acceptBoundedResponse(collector,task,length:changedURL ? 4 : 5,changedURL:changedURL) == .cancel,
+                    "invalid response stopped before first body chunk")
+                collector.urlSession(task.session,dataTask:task,didReceive:Data([1,2,3,4]))
+                collector.urlSession(task.session,task:task,didCompleteWithError:nil)
+            }
+        }
+    }
+    rows.append("bounded-http-streamed-declared-overflow-origin-and-late-callbacks")
+    for status in [301,401,500] {
+        try await expectHTTPFailure("HTTP status",matches:{ error in
+            if case ILoaderRemoteError.httpStatus(let observed) = error { return observed == status }; return false
+        }) {
+            _ = try await parkedHTTP { collector,task in
+                try expect(acceptBoundedResponse(collector,task,status:status) == .cancel,"non2xx stopped before body")
+            }
+        }
+    }
+    try await expectHTTPFailure("redirect",matches:{ error in
+        if case ILoaderRemoteError.httpStatus(302) = error { return true }; return false
+    }) {
+        _ = try await parkedHTTP { collector,task in
+            let refused = HTTPFixtureBox(false)
+            collector.urlSession(task.session,task:task,willPerformHTTPRedirection:boundedResponse(task,status:302),
+                newRequest:URLRequest(url:URL(string:"https://other.invalid/")!)) { refused.set($0 == nil) }
+            try expect(refused.value,"redirect destination never replayed")
+        }
+    }
+    rows.append("bounded-http-status-and-redirect-errors-preserved")
+    try await expectHTTPFailure("HTTP authentication challenge",matches:{ ($0 as? URLError)?.code == .userAuthenticationRequired }) {
+        _ = try await parkedHTTP { collector,task in
+            let rejected = HTTPFixtureBox(false)
+            let challenge = FakeHTTPAuthenticationChallenge(protectionSpace:.init(authenticationMethod:NSURLAuthenticationMethodHTTPBasic))
+            collector.urlSession(task.session,task:task,didReceive:challenge) { disposition,credential in
+                rejected.set(disposition == .cancelAuthenticationChallenge && credential == nil)
+            }
+            try expect(rejected.value,"unexpected HTTP auth neither looks up nor supplies a credential")
+        }
+    }
+    #if canImport(Security)
+    try await expectHTTPFailure("platform TLS handling",matches:{ $0 is CancellationError }) {
+        _ = try await parkedHTTP { collector,task in
+            let platformTrust = HTTPFixtureBox(false)
+            let challenge = FakeHTTPAuthenticationChallenge(protectionSpace:.init(authenticationMethod:NSURLAuthenticationMethodServerTrust))
+            collector.urlSession(task.session,task:task,didReceive:challenge) { disposition,credential in
+                platformTrust.set(disposition == .performDefaultHandling && credential == nil)
+            }
+            try expect(platformTrust.value,"TLS remains standard platform verification, not a bypass")
+            collector.cancel()
+        }
+    }
+    #endif
+    rows.append("bounded-http-no-automatic-http-auth-normal-tls")
+    try await expectHTTPFailure("cancel wins late completion",matches:{ $0 is CancellationError }) {
+        _ = try await parkedHTTP { collector,task in
+            _ = acceptBoundedResponse(collector,task)
+            collector.cancel()
+            collector.urlSession(task.session,dataTask:task,didReceive:Data([1,2,3,4]))
+            collector.urlSession(task.session,task:task,didCompleteWithError:nil)
+            try expect(acceptBoundedResponse(collector,task,length:1) == .cancel,"late response remains cancelled")
+        }
+    }
+    let noStart = HTTPFixtureBox(false)
+    let cancelled = ILoaderRemoteHTTPTask(request:URLRequest(url:URL(string:"https://unused.invalid/")!),maximumBytes:4,startTask:{_ in noStart.set(true)})
+    cancelled.cancel()
+    try await expectHTTPFailure("cancelled before run",matches:{ $0 is CancellationError }) { _ = try await cancelled.run() }
+    try expect(!noStart.value,"pre-cancelled collector starts no task")
+    rows.append("bounded-http-pre-and-mid-request-cancellation")
+    let script = TransportScript([Step(body:Data([1]),delayNanoseconds:30_000_000_000)])
+    try await SyntheticTransport.$current.withValue(script) {
+        let owner = ILoaderRemoteHTTPTransport()
+        let request = URLRequest(url:URL(string:"https://mac-ani.jkcoxson.com/v3/client_info")!)
+        let operation = Task { try await owner.data(for:request) }
+        defer { operation.cancel() }
+        for _ in 0..<1000 {
+            if !script.requests.isEmpty { break }
+            try await Task.sleep(nanoseconds:1_000_000)
+        }
+        try expect(script.requests.count == 1,"owned in-flight HTTP started")
+        owner.invalidate()
+        try await expectHTTPFailure("owner invalidation reaches in-flight body",matches:{ $0 is CancellationError }) { _ = try await operation.value }
+        try await expectHTTPFailure("invalidated owner admits no future request",matches:{ $0 is CancellationError }) { _ = try await owner.data(for:request) }
+        try expect(script.requests.count == 1,"invalidation cannot reactivate transport or retry")
+    }
+    rows.append("bounded-http-owner-invalidation-and-no-revival")
 }

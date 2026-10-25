@@ -153,12 +153,26 @@ def check(sidestore_root=None):
         for old,new in [('URLSession','FakeSession'),('URLSessionWebSocketTask','FakeWebSocketTask'),('URLSessionConfiguration','FakeSessionConfiguration'),('URLSessionTaskDelegate','FakeSessionTaskDelegate'),('URLSessionTask','FakeSessionTask')]:
             expected = re.sub(r'\b'+old+r'\b',new,expected)
         assert expected in context
+        http_path = ROOT/'Sources/Anisette/ILoaderRemoteHTTPTransport.swift'
+        http_source = http_path.read_text()
+        assert generate.clean_http_transport(http_source) in context
+        assert receipt['inputs'][str(http_path.relative_to(ROOT))] == generate.digest(http_path)
+        for token in ['data.count <= maximumBytes - body.count', 'http.expectedContentLength <= Int64(maximumBytes)',
+                      'config.urlCredentialStorage = nil', 'completionHandler(.cancelAuthenticationChallenge, nil)',
+                      'guard !invalidated else { throw CancellationError() }',
+                      'for task in pending { task.cancel() }', 'withTaskCancellationHandler',
+                      'guard http.url == request.url', '(200..<300).contains(http.statusCode)']:
+            assert token in http_source, 'Bounded HTTP production contract: '+token
+        assert 'httpTransport.invalidate()' in source
+        assert 'httpTransport.data(for: request, maximumBytes: 1_048_576)' in source
+        assert 'testBoundedHTTPTransport(&rows)' in (HERE/'RuntimeTests.swift').read_text()
+        checks.append('actual-bounded-http-collector-and-cancellation-ownership')
         checks.append('complete-production-auth-policy-provider-factory-bodies')
-        for required in ['FakeSession','FakeSessionConfiguration','FakeSessionTaskDelegate','FakeSessionTask','FakeWebSocketTask','SHA256','ILoaderRemoteAuthenticationContext','ILoaderRemoteAnisetteClient','ILoaderRemoteError','AnisetteError','ALTAnisetteData','ILoaderAttemptAnisetteSource']:
+        for required in ['FakeSession','FakeSessionConfiguration','FakeSessionTaskDelegate','FakeSessionTask','FakeWebSocketTask','SHA256','ILoaderRemoteAuthenticationContext','ILoaderRemoteAnisetteClient','ILoaderRemoteError','AnisetteError','ALTAnisetteData','ILoaderAttemptAnisetteSource','ILoaderRemoteHTTPTransport','ILoaderRemoteHTTPTask','FakeBoundedHTTPDataDelegate','FakeBoundedHTTPSession','FakeBoundedHTTPTask','FakeHTTPAuthenticationChallenge','FakeHTTPProtectionSpace','HTTPFixtureBox']:
             assert required in all_types, 'Unclosed explicit boundary: '+required
         for name in generate.OUTPUTS:
             masked = code_mask((output/name).read_text())
-            assert not re.search(r'\bURLSession(?:WebSocketTask|Configuration|TaskDelegate|Task)?\b',masked), 'Real network boundary in '+name
+            assert not re.search(r'\bURLSession(?:WebSocketTask|Configuration|TaskDelegate|DataDelegate|DataTask|Task)?\b',masked), 'Real network boundary in '+name
         checks.append('explicit-fake-network-and-crypto-symbol-boundaries')
     tests = (HERE/'RuntimeTests.swift').read_text()
     for token in ['testFactoryLifecycle','testAuthResync','testStageFreshness','testTrustedVerification','testTimeoutAndLateCancellation','60.999','clock.set(61)','same A2k','complete ORIGINAL CPD','error80045','topLevelFallback','jsonFallback','nestedMissingECWins','ILOADER_AUTH_PARITY_FIXTURE_PASS','iloader-auth-parity-cases-v1','AuthenticationDiagnosticTrace.validatedEncodedSnapshot(encoded)','AuthenticationHeaderProvenance(encoded:encoded)','AuthenticationProviderObservation.validatedEncoded(encoded)','testDiagnosticBoundaries','if case .assertion = error { throw error }','hangOnEmpty:true','fixtureRemoteTwoFactor(operation)']:
