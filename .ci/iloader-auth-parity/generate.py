@@ -71,7 +71,7 @@ def generate(output, sidestore_root=None):
     actor = 'private actor ILoaderAttemptAnisetteSource {'
     assert factory.count(begin) == factory.count(end) == factory.count(actor) == 1
     attempt_body = factory.split(begin, 1)[1].split(end, 1)[0]
-    source_actor = actor + factory.split(actor, 1)[1]
+    source_actor = actor + factory.split(actor, 1)[1].split('// V3_OWNED_ODA_AUTHENTICATION_BEGIN', 1)[0]
     keychain_path = sidestore_root / 'AltStore/Core/Components/Keychain.swift'
     keychain = keychain_path.read_text()
     core_begin = '// V3_REMOTE_IDENTITY_RECORD_CORE_BEGIN'

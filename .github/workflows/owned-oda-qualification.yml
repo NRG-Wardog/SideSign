@@ -1,0 +1,113 @@
+name: Owned ODA authentication qualification
+on:
+  push:
+    branches: [feature/owned-oda-context]
+    paths: ['Sources/**', 'Package.swift', 'Package.resolved', '.ci/owned-oda/**', '.github/workflows/owned-oda-qualification.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: owned-oda-context-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: github.repository == 'NRG-Wardog/SideSign' && github.ref == 'refs/heads/feature/owned-oda-context'
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+      PYTHONDONTWRITEBYTECODE: '1'
+      GIT_TERMINAL_PROMPT: '0'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          path: SideSign
+          persist-credentials: false
+          submodules: false
+      - name: Verify qualification graph and toolchain
+        id: graph
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          git -C SideSign rev-parse HEAD HEAD^{tree} > evidence/sign-source.txt
+          xcodebuild -version | tee evidence/xcode.txt
+          grep -Fx 'Xcode 26.4.1' evidence/xcode.txt
+          swift --version | tee evidence/swift.txt
+          python3 - <<'PY'
+          import json,pathlib,re,os
+          p=pathlib.Path('SideSign/.ci/owned-oda/qualification-inputs.json')
+          value=json.loads(p.read_text())
+          assert set(value)=={'sidestore_commit','anisettekit_commit'}
+          assert all(re.fullmatch('[0-9a-f]{40}',x) for x in value.values())
+          resolved=json.loads(pathlib.Path('SideSign/Package.resolved').read_text())
+          assert next(x for x in resolved['pins'] if x['identity']=='anisettekit')['state']['revision']==value['anisettekit_commit']
+          assert 'revision: "'+value['anisettekit_commit']+'"' in pathlib.Path('SideSign/Package.swift').read_text()
+          pathlib.Path('evidence/requested-graph.json').write_text(p.read_text())
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output: output.write('ss_sha='+value['sidestore_commit']+'\n')
+          PY
+      - name: Checkout exact SideStore identity gate
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: NRG-Wardog/SideStore
+          ref: ${{ steps.graph.outputs.ss_sha }}
+          path: SideStore
+          persist-credentials: false
+          submodules: false
+      - name: Verify SideStore source identity
+        id: source
+        env:
+          EXPECTED_SS: ${{ steps.graph.outputs.ss_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C SideStore rev-parse HEAD)" = "$EXPECTED_SS"
+          git -C SideStore rev-parse HEAD HEAD^{tree} > evidence/ss-source.txt
+      - name: Existing wire parity and owned source controls
+        id: controls
+        run: |
+          set -euo pipefail
+          { python3 SideSign/.ci/owned-oda/test_sources.py
+            python3 SideSign/.ci/auth-request-diagnostics/test_source.py
+            python3 SideSign/.ci/iloader-auth-parity/test_source.py --sidestore-root SideStore
+            python3 SideStore/.ci/owned-oda/test_sources.py
+            python3 SideStore/.ci/remote-identity-reuse/test_generator.py
+          } 2>&1 | tee evidence/source-controls.log
+      - name: Actual owned context fixture
+        id: context
+        timeout-minutes: 5
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          bash SideSign/.ci/owned-oda/run.sh 2>&1 | tee evidence/context.log
+      - name: Actual reserved identity fixture
+        id: identity
+        timeout-minutes: 3
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYTHON' 2>&1 | tee evidence/identity.log
+          import subprocess
+          subprocess.run(['bash','SideStore/.ci/owned-oda/run.sh'],check=True,timeout=120)
+          PYTHON
+      - name: Compile complete SideSign against pinned owned native API
+        id: compile
+        if: ${{ !cancelled() && steps.source.outcome == 'success' }}
+        working-directory: SideSign
+        run: |
+          set -euo pipefail
+          cp Package.resolved ../evidence/resolved-before.json
+          swift build --help | grep -F -- '--disable-automatic-resolution'
+          swift build --target SideSign --disable-automatic-resolution 2>&1 | tee ../evidence/compile.log
+          python3 - <<'PY'
+          import json,pathlib
+          before=json.loads(pathlib.Path('../evidence/resolved-before.json').read_text())
+          after=json.loads(pathlib.Path('Package.resolved').read_text())
+          assert before['pins']==after['pins'],'Resolved dependency pins changed during qualification'
+          PY
+      - name: Retain qualification evidence including failures
+        if: ${{ !cancelled() && steps.graph.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: owned-oda-context-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7

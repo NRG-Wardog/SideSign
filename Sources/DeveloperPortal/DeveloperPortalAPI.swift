@@ -368,7 +368,7 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
         do {
             let scopedRemote = ILoaderRemoteAuthentication.current
             try scopedRemote?.checkActive()
-            (data, response) = try await (scopedRemote?.session ?? session).data(for: request)
+            (data, response) = try await OwnedODAAuthentication.data(for: request, legacySession: scopedRemote?.session ?? session, remoteSelected: scopedRemote != nil, validateAfterResponse: false)
         } catch {
             throw error
         }
@@ -469,7 +469,7 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
         do {
             let scopedRemote = ILoaderRemoteAuthentication.current
             try scopedRemote?.checkActive()
-            (data, response) = try await (scopedRemote?.session ?? session).data(for: request)
+            (data, response) = try await OwnedODAAuthentication.data(for: request, legacySession: scopedRemote?.session ?? session, remoteSelected: scopedRemote != nil, validateAfterResponse: false)
         } catch {
             throw error
         }

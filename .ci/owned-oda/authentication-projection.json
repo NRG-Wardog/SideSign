@@ -1,0 +1,12 @@
+[
+  [
+    "(ILoaderRemoteAuthentication.current?.session ?? session).data(for: request)",
+    "OwnedODAAuthentication.data(for: request, legacySession: ILoaderRemoteAuthentication.current?.session ?? session, remoteSelected: ILoaderRemoteAuthentication.current != nil)",
+    3
+  ],
+  [
+    "(ILoaderRemoteAuthentication.current?.session ?? session).data(for: verifyRequest)",
+    "OwnedODAAuthentication.data(for: verifyRequest, legacySession: ILoaderRemoteAuthentication.current?.session ?? session, remoteSelected: ILoaderRemoteAuthentication.current != nil)",
+    2
+  ]
+]

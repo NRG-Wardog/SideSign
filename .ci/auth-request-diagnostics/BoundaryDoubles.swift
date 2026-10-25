@@ -152,3 +152,12 @@ public final class ILoaderRemoteAuthenticationContext: @unchecked Sendable {
     public func resynchronize(sim: String) async throws -> AnisetteData { throw FixtureFailure.unscripted }
 }
 // END ILOADER NIL-CONTEXT DOUBLE
+
+// The legacy/RemoteMac suites explicitly leave the distinct ODA route nil.
+// Actual ODA ownership/cancellation executes in .ci/owned-oda instead.
+public enum OwnedODAAuthentication {
+    public static func data(for request: URLRequest, legacySession: FakeSession,
+        remoteSelected: Bool, validateAfterResponse: Bool = true) async throws -> (Data, URLResponse) {
+        return try await legacySession.data(for: request)
+    }
+}

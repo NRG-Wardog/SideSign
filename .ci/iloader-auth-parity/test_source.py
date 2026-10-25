@@ -88,7 +88,7 @@ def check(sidestore_root=None):
     checks.append('official-source-five-hash-reference')
     auth = (ROOT/'Sources/DeveloperPortal/Authentication.swift').read_text()
     projected = auth
-    for path in [HERE/'authentication-projection.json', HERE.parent/'auth-request-diagnostics/instrumentation-projection.json']:
+    for path in [HERE.parent/'owned-oda/authentication-projection.json', HERE/'authentication-projection.json', HERE.parent/'auth-request-diagnostics/instrumentation-projection.json']:
         for old, new, count in reversed(json.loads(path.read_text())):
             assert projected.count(new) == count, 'Reverse projection count: '+new[:120]
             projected = projected.replace(new, old)

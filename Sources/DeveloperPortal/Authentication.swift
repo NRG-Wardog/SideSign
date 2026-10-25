@@ -396,7 +396,7 @@ public extension DeveloperPortal {
             provenance: AuthenticationHeaderProvenance(anisetteData: anisetteData, grandSlamHeaders: diagnosticHeaders).encoded)
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: request)
+            (data, response) = try await OwnedODAAuthentication.data(for: request, legacySession: ILoaderRemoteAuthentication.current?.session ?? session, remoteSelected: ILoaderRemoteAuthentication.current != nil)
         } catch {
             observation?.transport(error)
             throw error
@@ -774,7 +774,7 @@ public extension DeveloperPortal {
             request.httpMethod = "GET"
 
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: "trustedRequest")
-            let (data, response) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: request)
+            let (data, response) = try await OwnedODAAuthentication.data(for: request, legacySession: ILoaderRemoteAuthentication.current?.session ?? session, remoteSelected: ILoaderRemoteAuthentication.current != nil)
             observation?.response(request: request, data: data, response: response)
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.safeStatusCode ?? 0
@@ -842,7 +842,7 @@ public extension DeveloperPortal {
 
             diagnosticSerialized = true
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(request, phase: "phoneRequest")
-            let (data, response) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: request)
+            let (data, response) = try await OwnedODAAuthentication.data(for: request, legacySession: ILoaderRemoteAuthentication.current?.session ?? session, remoteSelected: ILoaderRemoteAuthentication.current != nil)
             observation?.response(request: request, data: data, response: response)
             let httpResponse = response as? HTTPURLResponse
             let statusCode = httpResponse?.safeStatusCode ?? 0
@@ -939,7 +939,7 @@ public extension DeveloperPortal {
             verifyRequest.setValue(code, forHTTPHeaderField: "security-code")
 
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(verifyRequest, phase: "trustedVerify")
-            let (verifyData, verifyResponse) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: verifyRequest)
+            let (verifyData, verifyResponse) = try await OwnedODAAuthentication.data(for: verifyRequest, legacySession: ILoaderRemoteAuthentication.current?.session ?? session, remoteSelected: ILoaderRemoteAuthentication.current != nil)
             observation?.response(request: verifyRequest, data: verifyData, response: verifyResponse)
             let verifyHttpResponse = verifyResponse as? HTTPURLResponse
             let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0
@@ -980,7 +980,7 @@ public extension DeveloperPortal {
 
             diagnosticSerialized = true
             observation = AuthenticationDiagnosticTrace.current?.beginRequest(verifyRequest, phase: "phoneVerify")
-            let (verifyData, verifyResponse) = try await (ILoaderRemoteAuthentication.current?.session ?? session).data(for: verifyRequest)
+            let (verifyData, verifyResponse) = try await OwnedODAAuthentication.data(for: verifyRequest, legacySession: ILoaderRemoteAuthentication.current?.session ?? session, remoteSelected: ILoaderRemoteAuthentication.current != nil)
             observation?.response(request: verifyRequest, data: verifyData, response: verifyResponse)
             let verifyHttpResponse = verifyResponse as? HTTPURLResponse
             let verifyStatusCode = verifyHttpResponse?.safeStatusCode ?? 0

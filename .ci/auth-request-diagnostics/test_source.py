@@ -12,6 +12,10 @@ def legacy_authentication(source):
  # New opt-in behavior is reversible independently of the original diagnostic
  # instrumentation. Runtime equivalence still executes the full, unprojected
  # candidate with ILoaderRemoteAuthentication.current == nil.
+ owned = HERE.parent/'owned-oda/authentication-projection.json'
+ for old,new,count in reversed(json.loads(owned.read_text())):
+  assert source.count(new)==count, 'Owned ODA reverse projection mismatch'
+  source=source.replace(new,old)
  projection = HERE.parent/'iloader-auth-parity/authentication-projection.json'
  if projection.exists():
   for old,new,count in reversed(json.loads(projection.read_text())):
