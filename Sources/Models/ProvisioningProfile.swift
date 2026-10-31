@@ -23,6 +23,13 @@ public struct ProvisioningProfile: Sendable, Codable, Equatable, Hashable, Ident
     public var isFreeProvisioningProfile: Bool
     public var data: Data
 
+    /// Complete decoded profile payload for conservative authorization comparison.
+    /// This uses the same decoder as this model; it is not CMS signature verification.
+    /// Callers must retain the trusted source/provenance of the profile bytes.
+    public func propertyList() throws -> [String: any Sendable] {
+        try Self.dictionary(fromEncodedData: data)
+    }
+
     public var entitlements: [String: any Sendable] {
         guard let dict = try? Self.dictionary(fromEncodedData: data),
               let ents = dict["Entitlements"] as? [String: any Sendable] else 
