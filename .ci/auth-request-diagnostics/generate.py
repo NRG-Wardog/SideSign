@@ -19,6 +19,7 @@ def generate(output):
  def read(path):
   p=ROOT/path; files[str(p.relative_to(ROOT))]=digest(p); return p.read_text()
  auth=read('Sources/DeveloperPortal/Authentication.swift')
+ read('.ci/initial-provider-rejection/authentication-projection.json')
  probes=(HERE/'PrivateProbes.swift').read_text()
  api=read('Sources/DeveloperPortal/DeveloperPortalAPI.swift')
  constants=read('Sources/Constants.swift')
@@ -43,7 +44,7 @@ def generate(output):
   'Errors.swift':read('Sources/Models/Errors.swift').split('public enum SignerError:',1)[0],
   'Types.swift':types,
   'BoundaryDoubles.swift':(HERE/'BoundaryDoubles.swift').read_text(),
-  'RuntimeTests.swift':(HERE/'RuntimeTests.swift').read_text(),
+  'RuntimeTests.swift':(HERE/'RuntimeTests.swift').read_text()+'\n'+read('.ci/initial-provider-rejection/RuntimeCases.swift'),
  }
  for name,content in generated.items(): (output/name).write_text(content)
  for path in HERE.rglob('*'):

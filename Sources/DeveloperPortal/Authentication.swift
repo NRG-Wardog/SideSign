@@ -14,6 +14,37 @@ private enum PushedCodeState {
     @TaskLocal static var handled = false
 }
 
+// Only the initial owned On-Device GSA request can create this evidence.
+// A numeric ServerError, diagnostic trace, or caller-supplied NSError cannot.
+public struct OwnedODAInitialProviderRejection: Error, LocalizedError, Sendable {
+    private let originatingContext: OwnedODAAuthenticationContext
+    fileprivate init(context: OwnedODAAuthenticationContext) { originatingContext = context }
+    public func matches(_ context: OwnedODAAuthenticationContext) -> Bool { originatingContext === context }
+    public static let serverCode = -80045
+    public var errorDescription: String? {
+        "Apple rejected this On-Device provider during authentication initialization (-80045)."
+    }
+
+    fileprivate static func confirmed(request: URLRequest, response: URLResponse, data: Data,
+                                      initialOwnedAttempt: Bool, context: OwnedODAAuthenticationContext?) throws -> Self? {
+        guard initialOwnedAttempt, let context, request.httpMethod == "POST",
+              request.url == Constants.URLs.grandSlamAuth,
+              let http = response as? HTTPURLResponse, http.statusCode == 200,
+              http.url == request.url,
+              let root = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let envelope = root["Response"] as? [String: Any],
+              let status = envelope["Status"] as? [String: Any],
+              ILoaderAuthenticationPolicy.signedInteger(status["ec"]) == -80045,
+              ILoaderAuthenticationPolicy.signedInteger(status["hsc"]) == 500 else { return nil }
+        try context.checkActive()
+        return Self(context: context)
+    }
+}
+
+private enum AuthenticationInvocationDepth {
+    @TaskLocal static var current = 0
+}
+
 public extension DeveloperPortal {
 
     func authenticate(appleID unsanitizedAppleID: String,
@@ -24,6 +55,8 @@ public extension DeveloperPortal {
                       accountRepairHandler: DeveloperPortal.AccountRepairHandler = DeveloperPortal.defaultAccountRepairHandler,
                       verificationHandler: DeveloperPortal.VerificationHandler? = nil) async throws -> AuthSession
     {
+        let initialInvocation = AuthenticationInvocationDepth.current == 0
+        return try await AuthenticationInvocationDepth.$current.withValue(AuthenticationInvocationDepth.current + 1) {
         let diagnostic = AuthenticationDiagnosticTrace.current
         return try await AuthenticationDiagnosticTrace.$invocation.withValue(diagnostic?.beginAuthentication()) {
         let trace = LoginDiagnosticTrace.current
@@ -68,7 +101,7 @@ public extension DeveloperPortal {
                 "u": sanitizedAppleID
             ]
 
-            var (initResponse, initObservation) = try await sendObservedAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData)
+            var (initResponse, initObservation) = try await sendObservedAuthenticationRequest(parameters: initParameters, anisetteData: anisetteData, initialOwnedAttempt: initialInvocation && OwnedODAAuthentication.current != nil && remoteContext == nil)
             if let remoteContext,
                let status = initResponse["Status"] as? [String: any Sendable], ILoaderAuthenticationPolicy.signedInteger(status["hsc"]) == 434 {
                 guard let sim = ILoaderAuthenticationPolicy.resyncSIM(initResponse), !sim.isEmpty else {
@@ -343,6 +376,7 @@ public extension DeveloperPortal {
             throw error
         }
         }
+        }
     }
 
     func sendAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData) async throws -> [String: any Sendable] {
@@ -350,7 +384,7 @@ public extension DeveloperPortal {
         return dictionary
     }
 
-    private func sendObservedAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData) async throws -> ([String: any Sendable], AuthenticationDiagnosticTrace.Request?) {
+    private func sendObservedAuthenticationRequest(parameters requestParameters: [String: any Sendable], anisetteData: AnisetteData, initialOwnedAttempt: Bool = false) async throws -> ([String: any Sendable], AuthenticationDiagnosticTrace.Request?) {
         let diagnostic = AuthenticationDiagnosticTrace.current
         let requestURL = Constants.URLs.grandSlamAuth
         var diagnosticHeaders = diagnosticCustomHeadersSnapshot()
@@ -451,6 +485,11 @@ public extension DeveloperPortal {
         observation?.status(status, ec: status["ec"], hsc: status["hsc"], effective: errorCode, source: "status", strictIntegerConsumer: ILoaderRemoteAuthentication.current != nil)
         if errorCode != 0 {
             let errorDesc = status["em"] as? String
+            if let rejection = try OwnedODAInitialProviderRejection.confirmed(request: request, response: response, data: data,
+                initialOwnedAttempt: initialOwnedAttempt && requestParameters["o"] as? String == "init" && OwnedODAAuthentication.current != nil && ILoaderRemoteAuthentication.current == nil, context: OwnedODAAuthentication.current) {
+                observation?.finish(.rejected, reason: .underlying)
+                throw rejection
+            }
             switch errorCode {
             case GrandSlamAuthErrorCodes.incorrectCredentials:
                 observation?.finish(.rejected, reason: .credentials)

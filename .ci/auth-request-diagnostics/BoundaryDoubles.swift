@@ -155,7 +155,20 @@ public final class ILoaderRemoteAuthenticationContext: @unchecked Sendable {
 
 // The legacy/RemoteMac suites explicitly leave the distinct ODA route nil.
 // Actual ODA ownership/cancellation executes in .ci/owned-oda instead.
+public final class FixtureOwnedODAContext: @unchecked Sendable {
+    private let lock = NSLock()
+    private var revoked = false
+    func invalidate() { lock.lock(); revoked = true; lock.unlock() }
+    func checkActive() throws {
+        try Task.checkCancellation()
+        lock.lock(); defer { lock.unlock() }
+        if revoked { throw CancellationError() }
+    }
+}
+public typealias OwnedODAAuthenticationContext = FixtureOwnedODAContext
 public enum OwnedODAAuthentication {
+    @TaskLocal public static var current: FixtureOwnedODAContext?
+
     public static func data(for request: URLRequest, legacySession: FakeSession,
         remoteSelected: Bool, validateAfterResponse: Bool = true) async throws -> (Data, URLResponse) {
         return try await legacySession.data(for: request)

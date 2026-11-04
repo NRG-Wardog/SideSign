@@ -12,6 +12,9 @@ def legacy_authentication(source):
  # New opt-in behavior is reversible independently of the original diagnostic
  # instrumentation. Runtime equivalence still executes the full, unprojected
  # candidate with ILoaderRemoteAuthentication.current == nil.
+ for old,new,count in reversed(json.loads((HERE.parent/'initial-provider-rejection/authentication-projection.json').read_text())):
+  assert source.count(new)==count, 'Initial provider rejection reverse projection mismatch'
+  source=source.replace(new,old)
  owned = HERE.parent/'owned-oda/authentication-projection.json'
  for old,new,count in reversed(json.loads(owned.read_text())):
   assert source.count(new)==count, 'Owned ODA reverse projection mismatch'

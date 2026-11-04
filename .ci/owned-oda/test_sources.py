@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 import unittest
 from pathlib import Path
@@ -6,6 +7,11 @@ ROOT=Path(__file__).resolve().parents[2]
 class OwnedSourceTests(unittest.TestCase):
  def test_legacy_auth_wire_byte_parity(self):
   text=(ROOT/'Sources/DeveloperPortal/Authentication.swift').read_text()
+  # Reverse only the separately reviewed initial-rejection control-flow delta.
+  # Keep the historical transport/wire baseline hash unchanged.
+  for old,new,count in reversed(json.loads((ROOT/'.ci/initial-provider-rejection/authentication-projection.json').read_text())):
+   self.assertEqual(text.count(new),count)
+   text=text.replace(new,old)
   pattern=r'OwnedODAAuthentication\.data\(for: (request|verifyRequest), legacySession: ILoaderRemoteAuthentication\.current\?\.session \?\? session, remoteSelected: ILoaderRemoteAuthentication\.current != nil\)'
   restored,count=re.subn(pattern,r'(ILoaderRemoteAuthentication.current?.session ?? session).data(for: \1)',text)
   self.assertEqual(count,5)

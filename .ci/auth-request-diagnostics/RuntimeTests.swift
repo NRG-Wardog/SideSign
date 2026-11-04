@@ -134,6 +134,7 @@ func runTwoFactor(_ operation: Int, step: Step, baseline: Bool, trace: Authentic
 
 @main struct AuthenticationRequestFixture {
     static func main() async throws {
+        try await initialProviderRejectionCases()
         var rows: [ExportCase] = []
         let success = Step(body: try accepted(["value": "retained", "nested": ["a", "b"]]))
         let acceptedTrace = try await parity("plist accepted",success,rows:&rows)
