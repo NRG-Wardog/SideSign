@@ -10,6 +10,16 @@ import Foundation
 
 public extension DeveloperPortal {
 
+    /// Read-only lookup whose successful return is authoritative for preservation.
+    func fetchAppIDsPreservingIdentity(for team: Team, session: Session) async throws -> [AppID] {
+        let response: [AppID] = try await sendRequest(
+            url: Constants.URLs.listAppIDs, session: session, team: team,
+            responseDecoder: { data, statusCode in
+                try AppIDLookupResponse.decode(data: data, statusCode: statusCode)
+            })
+        return response
+    }
+
     func fetchAppIDs(for team: Team, session: Session) async throws -> [AppID] {
         debugLog("[SideSign] fetchAppIDs starting...")
         verboseLog("[SideSign] Team: \(team.name)")

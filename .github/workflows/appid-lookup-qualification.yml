@@ -1,0 +1,21 @@
+name: Strict App ID lookup qualification
+on:
+  push:
+    branches: ['validation/strict-appid-lookup-nov10']
+  pull_request:
+    paths: ['Sources/DeveloperPortal/AppID*.swift', 'Sources/DeveloperPortal/DeveloperPortalAPI.swift', '.ci/appid-lookup/**', '.github/workflows/appid-lookup-qualification.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  parser:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Production parser runtime and wiring tests
+        run: bash .ci/appid-lookup/run.sh
+      - name: Compile complete SideSign against locked dependencies
+        run: swift build --target SideSign --disable-automatic-resolution

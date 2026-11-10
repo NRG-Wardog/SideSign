@@ -42,6 +42,9 @@ jobs:
           restore-keys: |
             spm-release-macos-${{ matrix.arch }}-
 
+      - name: Strict App ID preservation parser regression tests
+        run: bash .ci/appid-lookup/run.sh
+
       - name: Build macOS Binary
         run: |
           swift build -c release --triple ${{ matrix.triple }} --product sidesign

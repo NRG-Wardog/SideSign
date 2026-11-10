@@ -133,6 +133,7 @@ public protocol DeveloperPortalAPI: Sendable {
     func deleteDevice(_ device: Device, team: Team, session: Session) async throws -> Bool
     
     func fetchAppIDs(for team: Team, session: Session) async throws -> [AppID]
+    func fetchAppIDsPreservingIdentity(for team: Team, session: Session) async throws -> [AppID]
     func addAppID(withName name: String, bundleIdentifier: String, team: Team, session: Session) async throws -> AppID
     func updateAppID(_ appID: AppID, team: Team, session: Session) async throws -> AppID
     func deleteAppID(_ appID: AppID, for team: Team, session: Session) async throws -> Bool
@@ -155,6 +156,12 @@ public protocol DeveloperPortalAPI: Sendable {
 }
 
 public extension DeveloperPortalAPI {
+    // Existing third-party conformers remain source compatible, but must opt in
+    // to authoritative lookup rather than silently using permissive legacy data.
+    func fetchAppIDsPreservingIdentity(for team: Team, session: Session) async throws -> [AppID] {
+        throw AppIDLookupError.invalidHTTPResponse
+    }
+
     func authenticate(appleID unsanitizedAppleID: String, 
                       password: String, 
                       anisetteData: AnisetteData, 
@@ -314,6 +321,7 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
                                    additionalParameters: [String: any Sendable]? = nil,
                                    session apiSession: Session,
                                    team: Team? = nil,
+                                   responseDecoder: ((Data, Int?) throws -> T)? = nil,
                                    resultCodeHandler: ((Int, String) -> Error?)? = nil) async throws -> T
     {
         let h = customHeaders
@@ -376,6 +384,11 @@ public final class DeveloperPortal: DeveloperPortalAPI, Sendable {
         let httpResponse = response as? HTTPURLResponse
         SideSignPortalDiagnostics.responseObserver?(httpResponse?.statusCode, nil)
         let statusCode = httpResponse?.statusCode ?? 0
+
+        // Preservation-only parser runs before every permissive legacy fallback.
+        if let responseDecoder {
+            return try responseDecoder(data, httpResponse?.statusCode)
+        }
 
         guard !data.isEmpty else {
             if statusCode == HTTPStatusCodes.noContent || T.self == EmptyResponse.self {
