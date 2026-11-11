@@ -1,0 +1,30 @@
+{
+  "schema": "strict-appid-portal-wire-projection-v1",
+  "path": "Sources/DeveloperPortal/DeveloperPortalAPI.swift",
+  "before_commit": "3036cfb7803844842d604d17d9697ddbbbc4d50f",
+  "after_commit": "f4a1f10f1cfc404d241d563a06b21f0de07f7505",
+  "before_sha256": "dc531357c8b8a6c00e02011131a640cc942ff79434eca9655066def59341c54d",
+  "after_sha256": "e6b32263f6c5b4950baf6444eada6e843fb69b189229b18a4d65de7defd02140",
+  "edits": [
+    {
+      "before": "    func fetchAppIDs(for team: Team, session: Session) async throws -> [AppID]\n",
+      "after": "    func fetchAppIDs(for team: Team, session: Session) async throws -> [AppID]\n    func fetchAppIDsPreservingIdentity(for team: Team, session: Session) async throws -> [AppID]\n",
+      "count": 1
+    },
+    {
+      "before": "public extension DeveloperPortalAPI {\n",
+      "after": "public extension DeveloperPortalAPI {\n    // Existing third-party conformers remain source compatible, but must opt in\n    // to authoritative lookup rather than silently using permissive legacy data.\n    func fetchAppIDsPreservingIdentity(for team: Team, session: Session) async throws -> [AppID] {\n        throw AppIDLookupError.invalidHTTPResponse\n    }\n\n",
+      "count": 1
+    },
+    {
+      "before": "                                   team: Team? = nil,\n",
+      "after": "                                   team: Team? = nil,\n                                   responseDecoder: ((Data, Int?) throws -> T)? = nil,\n",
+      "count": 1
+    },
+    {
+      "before": "        let statusCode = httpResponse?.statusCode ?? 0\n\n",
+      "after": "        let statusCode = httpResponse?.statusCode ?? 0\n\n        // Preservation-only parser runs before every permissive legacy fallback.\n        if let responseDecoder {\n            return try responseDecoder(data, httpResponse?.statusCode)\n        }\n\n",
+      "count": 1
+    }
+  ]
+}
