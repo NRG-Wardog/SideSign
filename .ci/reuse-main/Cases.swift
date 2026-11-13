@@ -64,6 +64,23 @@ import Foundation
             signed: main, teamIdentifier: "TEAM"), "fallback cannot drop push capability")
         check(!ExtensionSigningPolicy.requiredCapabilitiesPreserved(required: ["com.apple.security.application-groups": ["group.required"]],
             signed: main, teamIdentifier: "TEAM"), "fallback cannot drop app groups")
+        let groupKey = "com.apple.security.application-groups"
+        let original: [String: any Sendable] = [groupKey: ["group.source"]]
+        let assigned: [String: any Sendable] = [groupKey: ["group.source.TEAM"]]
+        let mapping = ["group.source": "group.source.TEAM"]
+        check(!ExtensionSigningPolicy.requiredCapabilitiesPreserved(required: original, signed: assigned, teamIdentifier: "TEAM"), "unrecorded remap is rejected")
+        check(ExtensionSigningPolicy.requiredCapabilitiesPreserved(required: original, signed: assigned, teamIdentifier: "TEAM", provisionedAppGroupMapping: mapping), "recorded exact remap preserves group")
+        for (name, signed, map) in [
+            ("missing group", [String](), mapping),
+            ("different destination", ["group.other"], mapping),
+            ("extra grant", ["group.source.TEAM", "group.extra"], mapping),
+            ("duplicate grant", ["group.source.TEAM", "group.source.TEAM"], mapping),
+            ("unrelated mapping", ["group.source.TEAM"], ["group.other": "group.source.TEAM"]),
+            ("empty destination", [""], ["group.source": ""])
+        ] {
+            check(!ExtensionSigningPolicy.requiredCapabilitiesPreserved(required: original, signed: [groupKey: signed], teamIdentifier: "TEAM", provisionedAppGroupMapping: map), name)
+        }
+        check(!ExtensionSigningPolicy.requiredCapabilitiesPreserved(required: [groupKey: ["group.a", "group.b"]], signed: [groupKey: ["group.same"]], teamIdentifier: "TEAM", provisionedAppGroupMapping: ["group.a": "group.same", "group.b": "group.same"]), "mapping cannot merge groups")
         print("ReuseMain policy: \(checks) checks passed; device validation is not covered")
     }
 }

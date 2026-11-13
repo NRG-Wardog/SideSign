@@ -7,9 +7,9 @@ public struct ProvisioningProfile: Sendable {
     let name: String
     let bundleIdentifier: String
     var teamIdentifier = "TEAM"
-    let entitlements: [String: any Sendable]
+    var entitlements: [String: any Sendable]
     let data: Data
-    let expirationDate: Date
+    var expirationDate: Date
     var certificates: [Certificate] = [Certificate()]
 }
 public enum SignerError: Error {

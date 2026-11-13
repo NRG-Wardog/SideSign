@@ -65,6 +65,51 @@ import Foundation
                 extensionStrategy: .perExtensionPreservingCapabilities)
             preconditionFailure("Fallback must not silently remove required push")
         } catch SignerError.invalidApp { }
+        let groupKey = "com.apple.security.application-groups"
+        setup([groupKey: ["group.source"]])
+        var mappedProfile = insufficient
+        mappedProfile.entitlements[groupKey] = ["group.source.TEAM"]
+        let assignedMap = ["example.app.widget": ["group.source": "group.source.TEAM"]]
+        do {
+            _ = try await signer.signApp(at: appURL, provisioningProfiles: [mainProfile, mappedProfile], extensionStrategy: .perExtensionPreservingCapabilities)
+            preconditionFailure("Real strict signer must reject an unrecorded remap")
+        } catch SignerError.invalidApp { }
+        _ = try await signer.signApp(at: appURL, provisioningProfiles: [mainProfile, mappedProfile], extensionStrategy: .perExtensionPreservingCapabilities, provisionedAppGroupMappings: assignedMap)
+        for strategy in [ExtensionSigningStrategy.reuseMainWhenCompatible, .perExtensionPreservingCapabilities] {
+            let wrongMap = strategy == .reuseMainWhenCompatible ? assignedMap : ["wrong.bundle": ["group.source": "group.source.TEAM"]]
+            do {
+                _ = try await signer.signApp(at: appURL, provisioningProfiles: [mainProfile, mappedProfile], extensionStrategy: strategy, provisionedAppGroupMappings: wrongMap)
+                preconditionFailure("Mappings are scoped to separate strategy and exact bundle")
+            } catch SignerError.invalidApp { }
+        }
+        // A valid remap must never waive the rest of strict signing admission.
+        var expiredMapped = mappedProfile
+        expiredMapped.expirationDate = .distantPast
+        var foreignMapped = mappedProfile
+        foreignMapped.teamIdentifier = "OTHER"
+        let wrongLeaf = AppBundleSigner(team: Team(), keyStore: KeyStore(certificate: Certificate(data: Data("different-leaf".utf8))))
+        for (candidateSigner, candidateProfile) in [(signer, expiredMapped), (signer, foreignMapped), (wrongLeaf, mappedProfile)] {
+            do {
+                _ = try await candidateSigner.signApp(at: appURL, provisioningProfiles: [mainProfile, candidateProfile], extensionStrategy: .perExtensionPreservingCapabilities, provisionedAppGroupMappings: assignedMap)
+                preconditionFailure("Recorded mapping cannot bypass profile/certificate admission")
+            } catch SignerError.invalidApp { }
+        }
+        setup([groupKey: ["group.source"], "aps-environment": "production"])
+        do {
+            _ = try await signer.signApp(at: appURL, provisioningProfiles: [mainProfile, mappedProfile], extensionStrategy: .perExtensionPreservingCapabilities, provisionedAppGroupMappings: assignedMap)
+            preconditionFailure("Recorded group mapping cannot drop another capability")
+        } catch SignerError.invalidApp { }
+        setup([groupKey: ["group.source"]])
+        FixtureState.shared.bundles[appURL] = AppBundle(url: appURL, id: "example.app", entitlements: [groupKey: ["group.source"]], extensions: [extensionURL])
+        var mappedMain = mainProfile
+        mappedMain.entitlements[groupKey] = ["group.source.TEAM"]
+        _ = try await signer.signApp(at: appURL, provisioningProfiles: [mappedMain, mappedProfile], extensionStrategy: .perExtensionPreservingCapabilities, provisionedAppGroupMappings: ["example.app": ["group.source": "group.source.TEAM"], "example.app.widget": ["group.source": "group.source.TEAM"]])
+        setup([groupKey: ["group.source"]])
+        mappedProfile.entitlements[groupKey] = ["group.tampered"]
+        do {
+            _ = try await signer.signApp(at: appURL, provisioningProfiles: [mainProfile, mappedProfile], extensionStrategy: .perExtensionPreservingCapabilities, provisionedAppGroupMappings: assignedMap)
+            preconditionFailure("A changed profile cannot satisfy recorded mapping")
+        } catch SignerError.invalidApp { }
         setup()
         var foreign = mainProfile
         foreign.teamIdentifier = "OTHER"

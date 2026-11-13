@@ -97,6 +97,7 @@ public struct AppBundleSigner: CodeSignerAPI, Sendable {
                         extensionStrategy: ExtensionSigningStrategy,
                         originalExtensionBundleIdentifiers: [String: String] = [:],
                         previouslyReusedExtensionIdentifiers: Set<String> = [],
+                        provisionedAppGroupMappings: [String: [String: String]] = [:],
                         progress: Progress? = nil) async throws -> [ExtensionSigningDecision]
     {
         debugLog("[SideSign] AppBundleSigner.signApp called")
@@ -165,7 +166,9 @@ public struct AppBundleSigner: CodeSignerAPI, Sendable {
 
             if extensionStrategy != .perExtension,
                !ExtensionSigningPolicy.requiredCapabilitiesPreserved(required: app.entitlements,
-                    signed: filteredEntitlements, teamIdentifier: matchedProfile.teamIdentifier) {
+                    signed: filteredEntitlements, teamIdentifier: matchedProfile.teamIdentifier,
+                    provisionedAppGroupMapping: extensionStrategy == .perExtensionPreservingCapabilities
+                        ? provisionedAppGroupMappings[app.bundleIdentifier] ?? [:] : [:]) {
                 throw SignerError.invalidApp(cause: "The selected profile cannot preserve all required app or extension capabilities.")
             }
 

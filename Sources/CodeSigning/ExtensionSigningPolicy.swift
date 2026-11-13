@@ -89,9 +89,27 @@ public enum ExtensionSigningPolicy {
     }
 
     public static func requiredCapabilitiesPreserved(
-        required: [String: any Sendable], signed: [String: any Sendable], teamIdentifier: String
+        required: [String: any Sendable], signed: [String: any Sendable], teamIdentifier: String,
+        provisionedAppGroupMapping: [String: String] = [:]
     ) -> Bool {
+        // Only caller-supplied results of successful portal assignments authorize
+        // a remap. No suffix inference. Reject unrelated keys and many-to-one maps.
+        let groupKey = "com.apple.security.application-groups"
+        if !provisionedAppGroupMapping.isEmpty {
+            guard let groups = required[groupKey] as? [String],
+                  Set(provisionedAppGroupMapping.keys).isSubset(of: Set(groups)),
+                  Set(provisionedAppGroupMapping.values).count == provisionedAppGroupMapping.count,
+                  provisionedAppGroupMapping.values.allSatisfy({ !$0.isEmpty }) else { return false }
+        }
         for (key, value) in required where !identityKeys.contains(key) {
+            if key == groupKey, !provisionedAppGroupMapping.isEmpty {
+                guard let groups = value as? [String], let signedGroups = signed[key] as? [String] else { return false }
+                let mapped = groups.map { provisionedAppGroupMapping[$0] ?? $0 }
+                guard Set(mapped).count == groups.count,
+                      Set(signedGroups).count == signedGroups.count,
+                      Set(mapped) == Set(signedGroups) else { return false }
+                continue
+            }
             if key == "keychain-access-groups", let groups = value as? [String] {
                 let normalized = groups.compactMap { group -> String? in
                     guard let dot = group.firstIndex(of: ".") else { return nil }
